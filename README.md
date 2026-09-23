@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/grzegorz914/homeassistant-mqtt-media-player/main/custom_components/mqtt_universal_media_player/brand/logo@2x.png" alt="MQTT Media Player" width="480">
+</p>
+
 # MQTT Universal Media Player
 
 A Home Assistant custom integration that creates **one full `media_player` entity** from a **single retained MQTT discovery message**.
