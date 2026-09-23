@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MQTT Universal Media Player",
+        "description": "Tworzy odtwarzacze multimedialne z wiadomości MQTT discovery publikowanych na <prefix>/media_player/<id>/config.",
+        "data": {
+          "discovery_prefix": "Prefiks discovery"
+        }
+      }
+    },
+    "error": {
+      "invalid_prefix": "Prefiks nie może być pusty i nie może zawierać znaków + ani #."
+    },
+    "abort": {
+      "single_instance_allowed": "Już skonfigurowano. Możliwa jest tylko jedna konfiguracja."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "discovery_prefix": "Prefiks discovery"
+        }
+      }
+    },
+    "error": {
+      "invalid_prefix": "Prefiks nie może być pusty i nie może zawierać znaków + ani #."
+    }
+  }
+}

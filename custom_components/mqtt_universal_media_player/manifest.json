@@ -1,0 +1,14 @@
+{
+  "domain": "mqtt_universal_media_player",
+  "name": "MQTT Universal Media Player",
+  "codeowners": ["@grzegorz914"],
+  "config_flow": true,
+  "dependencies": ["mqtt"],
+  "documentation": "https://github.com/grzegorz914/homeassistant-mqtt-media-player",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/grzegorz914/homeassistant-mqtt-media-player/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}
