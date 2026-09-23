@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "MQTT Universal Media Player",
-        "description": "Tworzy odtwarzacze multimedialne z wiadomości MQTT discovery publikowanych na <prefix>/media_player/<id>/config.",
+        "description": "Tworzy odtwarzacze multimedialne z wiadomości MQTT discovery publikowanych pod prefiksem discovery (temat media_player/ID/config).",
         "data": {
           "discovery_prefix": "Prefiks discovery"
         }

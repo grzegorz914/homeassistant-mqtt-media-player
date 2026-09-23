@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "MQTT Universal Media Player",
-        "description": "Creates media players from MQTT discovery messages published to <prefix>/media_player/<id>/config.",
+        "description": "Creates media players from MQTT discovery messages published under the discovery prefix (topic media_player/ID/config).",
         "data": {
           "discovery_prefix": "Discovery prefix"
         }
