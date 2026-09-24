@@ -114,6 +114,8 @@ async def test_state_updates_and_partial_merge(hass: HomeAssistant, mqtt_mock) -
     assert state.attributes[ATTR_MEDIA_VOLUME_MUTED] is False
     assert state.attributes[ATTR_INPUT_SOURCE] == "TV Audio"
     assert state.attributes[ATTR_SOUND_MODE] == "Movie"
+    # Second line of the media card shows the current source and sound mode
+    assert state.attributes["app_name"] == "TV Audio · Movie"
 
     # Partial update keeps the other values.
     async_fire_mqtt_message(hass, DENON["state_topic"], json.dumps({"muted": True}))

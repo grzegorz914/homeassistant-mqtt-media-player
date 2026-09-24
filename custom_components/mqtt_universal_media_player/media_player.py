@@ -311,6 +311,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             value = s.get(field)
             setattr(self, f"_attr_{field}", value if value not in ("", None) else None)
 
+        # The media card shows app_name as the second line, use it to show the
+        # current source and sound mode without opening the selectors.
+        current = " · ".join(v for v in (self._attr_source, self._attr_sound_mode) if v)
+        if current:
+            self._attr_app_name = current
+
     # ----- commands -------------------------------------------------------
 
     async def _async_send(self, key: str, value: Any) -> None:

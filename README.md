@@ -149,6 +149,8 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |
 | `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name` | Shown in the media card. |
 
+The second line of the media card (`app_name`) shows the current source and sound mode, e.g. `TV Audio · Movie`, so they are visible without opening the selectors. When the device has neither, the `app_name` from the state is shown.
+
 ## Development
 
 ```bash
