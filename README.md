@@ -16,6 +16,7 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 * sound mode selection
 * play / pause / stop / next / previous
 * media information (title, artist, channel, app, artwork)
+* source icon or channel picon from a raw image topic
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -98,6 +99,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `name` | no | Entity name. When omitted the entity uses the device name. |
 | `device_class` | no | `tv`, `receiver`, `speaker` or `projector`. |
 | `availability_topic` | no | When set, the entity is unavailable until `payload_available` is received. |
+| `image_topic` | no | Topic with the raw image bytes (PNG, JPEG, GIF, WebP or SVG) of the current source, e.g. an app icon or a channel picon. Publish it retained when the source changes, an empty payload clears it. The image is shown in the media card. |
 | `payload_available` | no | Default `online`. |
 | `payload_not_available` | no | Default `offline`. |
 | `device` | no | `identifiers`, `name`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number`, `configuration_url`. |

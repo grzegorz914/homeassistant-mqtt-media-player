@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Any
@@ -49,6 +50,21 @@ _MEDIA_FIELDS = (
     "media_image_url",
     "app_name",
 )
+
+
+def _image_content_type(data: bytes) -> str:
+    """Detect the image type from its first bytes."""
+    if data.startswith(b"\x89PNG"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8"):
+        return "image/jpeg"
+    if data.startswith(b"GIF8"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data.lstrip()[:5] in (b"<?xml", b"<svg ") or data.lstrip().startswith(b"<svg"):
+        return "image/svg+xml"
+    return "image/png"
 
 
 async def async_setup_entry(
@@ -118,6 +134,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         self._unsubscribe: list = []
         self._available_flag = True
         self._state: dict[str, Any] = {}
+        self._image: bytes | None = None
         self._apply_config(config)
         self._attr_unique_id = config["unique_id"]
 
@@ -191,7 +208,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         """A new config was published for this device."""
         topics_changed = any(
             config.get(key) != self._config.get(key)
-            for key in ("state_topic", "availability_topic")
+            for key in ("state_topic", "availability_topic", "image_topic")
         )
         self._apply_config(config)
         if topics_changed and self.hass is not None:
@@ -241,6 +258,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                     self.hass, topic, self._async_availability_received, qos=1
                 )
             )
+        if topic := self._config.get("image_topic"):
+            self._unsubscribe.append(
+                await mqtt.async_subscribe(
+                    self.hass, topic, self._async_image_received, qos=1, encoding=None
+                )
+            )
 
     @callback
     def _async_state_received(self, msg: mqtt.ReceiveMessage) -> None:
@@ -255,6 +278,26 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         self._state.update(data)
         self._update_from_state()
         self.async_write_ha_state()
+
+    @callback
+    def _async_image_received(self, msg: mqtt.ReceiveMessage) -> None:
+        # Raw image bytes of the current source, an empty payload clears it
+        payload = msg.payload
+        if isinstance(payload, str):
+            payload = payload.encode()
+        self._image = payload or None
+        self.async_write_ha_state()
+
+    @property
+    def media_image_hash(self) -> str | None:
+        if self._image is not None:
+            return hashlib.sha256(self._image).hexdigest()[:16]
+        return super().media_image_hash
+
+    async def async_get_media_image(self) -> tuple[bytes | None, str | None]:
+        if self._image is not None:
+            return self._image, _image_content_type(self._image)
+        return await super().async_get_media_image()
 
     @callback
     def _async_availability_received(self, msg: mqtt.ReceiveMessage) -> None:

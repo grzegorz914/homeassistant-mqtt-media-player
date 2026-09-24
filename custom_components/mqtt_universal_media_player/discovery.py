@@ -107,6 +107,7 @@ CONFIG_SCHEMA = vol.Schema(
         vol.Required("state_topic"): vol.All(str, vol.Length(min=1)),
         vol.Required("command_topic"): vol.All(str, vol.Length(min=1)),
         vol.Optional("availability_topic"): str,
+        vol.Optional("image_topic"): vol.All(str, vol.Length(min=1)),
         vol.Optional("payload_available", default="online"): str,
         vol.Optional("payload_not_available", default="offline"): str,
         vol.Optional("device", default=dict): DEVICE_SCHEMA,

@@ -238,3 +238,29 @@ async def test_unload(hass: HomeAssistant, mqtt_mock) -> None:
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert hass.states.get(ENTITY).state == "unavailable"
+
+
+async def test_image_topic(hass: HomeAssistant, mqtt_mock, hass_client) -> None:
+    """Raw image bytes on image_topic are served as the entity picture."""
+    await _setup(hass, mqtt_mock)
+    await _discover(hass, {**DENON, "image_topic": "denon/Denon AVR/HA Image"})
+    async_fire_mqtt_message(hass, DENON["state_topic"], json.dumps({"power": True}))
+    await hass.async_block_till_done()
+    assert "entity_picture" not in hass.states.get(ENTITY).attributes
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    async_fire_mqtt_message(hass, "denon/Denon AVR/HA Image", png)
+    await hass.async_block_till_done()
+    picture = hass.states.get(ENTITY).attributes["entity_picture"]
+    assert picture.startswith("/api/media_player_proxy/")
+
+    client = await hass_client()
+    resp = await client.get(picture)
+    assert resp.status == 200
+    assert resp.headers["Content-Type"] == "image/png"
+    assert await resp.read() == png
+
+    # Empty payload clears the image
+    async_fire_mqtt_message(hass, "denon/Denon AVR/HA Image", b"")
+    await hass.async_block_till_done()
+    assert "entity_picture" not in hass.states.get(ENTITY).attributes
