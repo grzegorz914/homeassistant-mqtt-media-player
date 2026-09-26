@@ -27,5 +27,12 @@
     "error": {
       "invalid_prefix": "The prefix must not be empty and must not contain + or #."
     }
+  },
+  "entity": {
+    "switch": {
+      "screen": {
+        "name": "Screen"
+      }
+    }
   }
 }

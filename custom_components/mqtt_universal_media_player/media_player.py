@@ -7,8 +7,6 @@ import json
 import logging
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.components import mqtt
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
@@ -18,13 +16,10 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
-from homeassistant.helpers import device_registry as dr, entity_registry as er
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import discovery
-from .const import CONF_DISCOVERY_PREFIX, DEFAULT_DISCOVERY_PREFIX, DOMAIN
+from .entity import async_setup_discovered, device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,52 +67,9 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Subscribe to discovery and create an entity per discovered device."""
-    if not await mqtt.async_wait_for_mqtt_client(hass):
-        raise ConfigEntryNotReady("MQTT integration is not available")
-
-    prefix = entry.options.get(
-        CONF_DISCOVERY_PREFIX,
-        entry.data.get(CONF_DISCOVERY_PREFIX, DEFAULT_DISCOVERY_PREFIX),
-    )
-    discovery_topic = f"{prefix}/media_player/+/config"
-    players: dict[str, MqttUniversalMediaPlayer] = {}
-
-    @callback
-    def _async_discovery(msg: mqtt.ReceiveMessage) -> None:
-        object_id = msg.topic.split("/")[-2]
-        payload = msg.payload
-
-        # Empty retained payload removes the device.
-        if not payload or (isinstance(payload, str) and not payload.strip()):
-            if (player := players.pop(object_id, None)) is not None:
-                hass.async_create_task(player.async_remove_from_discovery())
-            return
-
-        try:
-            data = json.loads(payload)
-        except ValueError:
-            _LOGGER.debug("Ignoring non JSON discovery payload on %s", msg.topic)
-            return
-        if not discovery.is_ours(data):
-            return
-
-        try:
-            config = discovery.validate(data)
-        except vol.Invalid as err:
-            _LOGGER.warning("Invalid discovery payload on %s: %s", msg.topic, err)
-            return
-
-        if (player := players.get(object_id)) is not None:
-            player.async_update_discovery(config)
-            return
-
-        player = MqttUniversalMediaPlayer(config, entry.entry_id)
-        players[object_id] = player
-        async_add_entities([player])
-
-    entry.async_on_unload(
-        await mqtt.async_subscribe(hass, discovery_topic, _async_discovery, qos=1)
+    """Create an entity per discovered device, discovery is subscribed in __init__."""
+    async_setup_discovered(
+        hass, entry, async_add_entities, lambda config: MqttUniversalMediaPlayer(config, entry.entry_id)
     )
 
 
@@ -144,18 +96,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         self._config = config
         commands = config["commands"]
 
-        device = config["device"]
-        identifiers = device.get("identifiers") or [config["unique_id"]]
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, ident) for ident in identifiers},
-            name=device.get("name") or config.get("name") or config["unique_id"],
-            manufacturer=device.get("manufacturer"),
-            model=device.get("model"),
-            sw_version=device.get("sw_version"),
-            hw_version=device.get("hw_version"),
-            serial_number=device.get("serial_number"),
-            configuration_url=device.get("configuration_url"),
-        )
+        self._attr_device_info = device_info(config)
         # A name in the payload overrides the device name as entity name.
         self._attr_name = config.get("name") if config.get("name") else None
         self._attr_device_class = (
@@ -216,21 +157,6 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         if self.hass is not None:
             self._update_from_state()
             self.async_write_ha_state()
-
-    async def async_remove_from_discovery(self) -> None:
-        """Remove entity (and its device when empty) after an empty config."""
-        ent_reg = er.async_get(self.hass)
-        dev_reg = dr.async_get(self.hass)
-        entry = ent_reg.async_get(self.entity_id)
-        if entry is None:
-            await self.async_remove(force_remove=True)
-            return
-        device_id = entry.device_id
-        ent_reg.async_remove(self.entity_id)
-        if device_id and not er.async_entries_for_device(
-            ent_reg, device_id, include_disabled_entities=True
-        ):
-            dev_reg.async_remove_device(device_id)
 
     # ----- MQTT subscriptions ---------------------------------------------
 

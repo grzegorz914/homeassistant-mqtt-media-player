@@ -17,6 +17,7 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 * play / pause / stop / next / previous
 * media information (title, artist, channel, app, artwork)
 * source icon or channel picon from a raw image topic
+* optional screen switch and notify entity on the same device, like the built-in LG webOS TV integration
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -118,10 +119,14 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `source` | `{ "key" }` | `{key: source id}` |
 | `sound_mode` | `{ "key" }` | `{key: sound mode id}` |
 | `play`, `pause`, `play_pause`, `stop`, `next`, `previous` | `{ "key", "value" }` | `{key: value}`, e.g. a remote key code |
+| `screen` | `{ "key" }` | Creates a `Screen` switch on the device. `{key: true}` screen on, `{key: false}` screen off while the sound keeps playing. The state is the `screen` key of the state message. |
+| `notify` | `{ "key" }` | Creates a notify entity on the device (`notify.send_message`). `{key: "message"}`, a title is sent in front of the message as `title: message`. |
 
 `"toggle": true` is for devices that flip the state on every command regardless of the value. The command is then only sent when the requested state differs from the current one.
 
 When only `volume_set` is mapped, volume up / down steps by `step`.
+
+The screen switch and the notify entity are unavailable while the device is off (`power: false` or `state: off`) or offline, like in the built-in LG webOS TV integration.
 
 ## State message
 
@@ -148,6 +153,7 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `state` | `on`, `idle`, `playing`, `paused`, `buffering` or `off`. When omitted a powered device is `on`. |
 | `volume` | In the device scale, converted with `volume_set.min` / `max` (default 0–100). |
 | `muted` | Boolean. |
+| `screen` | Boolean, state of the screen switch. |
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |
 | `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name` | Shown in the media card. |
 

@@ -80,6 +80,9 @@ DEVICE_SCHEMA = vol.Schema(
     extra=vol.REMOVE_EXTRA,
 )
 
+# Key only command, the entity supplies the value (screen on/off, notification text).
+KEY_SCHEMA = vol.Schema({vol.Required("key"): str})
+
 COMMANDS_SCHEMA = vol.Schema(
     {
         vol.Optional("power"): COMMAND_SCHEMA,
@@ -94,6 +97,10 @@ COMMANDS_SCHEMA = vol.Schema(
         vol.Optional("stop"): FIXED_COMMAND_SCHEMA,
         vol.Optional("next"): FIXED_COMMAND_SCHEMA,
         vol.Optional("previous"): FIXED_COMMAND_SCHEMA,
+        # Extra entities on the same device: a screen switch ({key: true/false},
+        # state field "screen") and a notify entity ({key: "message"}).
+        vol.Optional("screen"): KEY_SCHEMA,
+        vol.Optional("notify"): KEY_SCHEMA,
     },
     extra=vol.REMOVE_EXTRA,
 )
