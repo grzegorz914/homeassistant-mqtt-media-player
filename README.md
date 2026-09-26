@@ -18,6 +18,8 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 * media information (title, artist, channel, app, artwork)
 * source icon or channel picon from a raw image topic
 * optional screen switch and notify entity on the same device, like the built-in LG webOS TV integration
+* progress bar (position and duration)
+* media browser with folders (e.g. bouquets with channels, apps, inputs) and play media, including Home Assistant media sources
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -120,6 +122,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `sound_mode` | `{ "key" }` | `{key: sound mode id}` |
 | `play`, `pause`, `play_pause`, `stop`, `next`, `previous` | `{ "key", "value" }` | `{key: value}`, e.g. a remote key code |
 | `screen` | `{ "key" }` | Creates a `Screen` switch on the device. `{key: true}` screen on, `{key: false}` screen off while the sound keeps playing. The state is the `screen` key of the state message. |
+| `play_media` | `{ "key" }` | `{key: {"id": media id, "type": media type}}`, from the `media_player.play_media` action and the media browser. Home Assistant media sources are sent as a url with their mime type. Without it browser items select the source with the same id. |
 | `notify` | `{ "key" }` | Creates a notify entity on the device (`notify.send_message`). `{key: "message"}`, a title is sent in front of the message as `title: message`. |
 
 `"toggle": true` is for devices that flip the state on every command regardless of the value. The command is then only sent when the requested state differs from the current one.
@@ -127,6 +130,27 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 When only `volume_set` is mapped, volume up / down steps by `step`.
 
 The screen switch and the notify entity are unavailable while the device is off (`power: false` or `state: off`) or offline, like in the built-in LG webOS TV integration.
+
+### Media browser
+
+`browse` in the discovery message adds folders to the media browser. Without it the browser shows the sources.
+
+```json
+"browse": [
+  { "name": "Favourites", "type": "channel", "items": [ { "id": "1:0:1:3DCD:640:13E:820000:0:0:0:", "name": "TVP 1 HD" } ] },
+  { "name": "Apps", "type": "app", "items": [ { "id": "netflix", "name": "Netflix" } ] }
+]
+```
+
+| Key | Description |
+| --- | --- |
+| `name` | Folder name. |
+| `type` | Sent as the media type with `play_media` (`channel`, `app`, `video`, `music`...). `source` (default) selects the source with the item id. |
+| `items` | `id`, `name` and an optional `image` url shown as the thumbnail. |
+
+The item whose `id` is the current `source` of the state message is marked with `●`, has no play button, and its folder is marked too.
+
+Devices whose icons Home Assistant cannot load itself (self signed certificate, password, icons bundled with the device software) set `browse_image_topic` in the discovery message. The integration then sends `{"BrowseImage": {"type": ..., "id": ..., "key": ...}}` on the command topic when an icon is shown and the device answers with the image bytes (not retained) on `<browse_image_topic>/<key>`, an empty payload when the item has no icon. Answers are cached.
 
 ## State message
 
@@ -154,6 +178,8 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `volume` | In the device scale, converted with `volume_set.min` / `max` (default 0–100). |
 | `muted` | Boolean. |
 | `screen` | Boolean, state of the screen switch. |
+| `media_position`, `media_duration` | Seconds, shown as a progress bar. Publish them when the media changes, Home Assistant moves the bar itself. |
+| `media_position_updated_at` | Optional, epoch seconds or ISO time of `media_position`. When omitted the time the position changed is used. |
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |
 | `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name` | Shown in the media card. |
 

@@ -101,6 +101,29 @@ COMMANDS_SCHEMA = vol.Schema(
         # state field "screen") and a notify entity ({key: "message"}).
         vol.Optional("screen"): KEY_SCHEMA,
         vol.Optional("notify"): KEY_SCHEMA,
+        # play_media service and media browser items: {key: {"id": ..., "type": ...}}
+        vol.Optional("play_media"): KEY_SCHEMA,
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+# Media browser: folders of playable items, e.g. bouquets with channels or apps.
+# "type" is the media content type sent with play_media ("channel", "app", ...),
+# "source" plays the item by selecting the source with the same id.
+BROWSE_ITEM_SCHEMA = vol.Schema(
+    {
+        vol.Required("id"): _SCALAR,
+        vol.Required("name"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("image"): str,
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+BROWSE_FOLDER_SCHEMA = vol.Schema(
+    {
+        vol.Required("name"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("type", default="source"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("items", default=list): [BROWSE_ITEM_SCHEMA],
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -115,12 +138,16 @@ CONFIG_SCHEMA = vol.Schema(
         vol.Required("command_topic"): vol.All(str, vol.Length(min=1)),
         vol.Optional("availability_topic"): str,
         vol.Optional("image_topic"): vol.All(str, vol.Length(min=1)),
+        # Media browser icons fetched by the device: {BrowseImage: {type, id}} on the command
+        # topic, the device answers with the image bytes on <browse_image_topic>/<key>
+        vol.Optional("browse_image_topic"): vol.All(str, vol.Length(min=1)),
         vol.Optional("payload_available", default="online"): str,
         vol.Optional("payload_not_available", default="offline"): str,
         vol.Optional("device", default=dict): DEVICE_SCHEMA,
         vol.Optional("commands", default=dict): COMMANDS_SCHEMA,
         vol.Optional("sources", default=list): [ITEM_SCHEMA],
         vol.Optional("sound_modes", default=list): [ITEM_SCHEMA],
+        vol.Optional("browse", default=list): [BROWSE_FOLDER_SCHEMA],
     },
     extra=vol.REMOVE_EXTRA,
 )

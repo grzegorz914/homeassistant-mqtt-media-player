@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections import OrderedDict
 import hashlib
 import json
 import logging
 from typing import Any
 
-from homeassistant.components import mqtt
+from datetime import datetime
+
+from homeassistant.components import media_source, mqtt
 from homeassistant.components.media_player import (
+    BrowseMedia,
+    MediaClass,
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    async_process_play_media_url,
 )
+from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .entity import async_setup_discovered, device_info
 
@@ -45,6 +54,25 @@ _MEDIA_FIELDS = (
     "media_image_url",
     "app_name",
 )
+
+
+# Media browser classes of the folder types, anything else is a generic item.
+_BROWSE_CLASSES = {
+    "channel": MediaClass.CHANNEL,
+    "app": MediaClass.APP,
+    "video": MediaClass.VIDEO,
+    "music": MediaClass.MUSIC,
+    "playlist": MediaClass.PLAYLIST,
+    "podcast": MediaClass.PODCAST,
+    "movie": MediaClass.MOVIE,
+    "tvshow": MediaClass.TV_SHOW,
+    "source": MediaClass.CHANNEL,
+}
+_FOLDER = "folder"
+# Marks the current source or channel in the media browser, the frontend has no selected state
+_CURRENT = "●"
+_BROWSE_IMAGE_CACHE = 500
+_BROWSE_IMAGE_TIMEOUT = 5
 
 
 def _image_content_type(data: bytes) -> str:
@@ -87,6 +115,10 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         self._available_flag = True
         self._state: dict[str, Any] = {}
         self._image: bytes | None = None
+        # Media browser icons, answered by the device on browse_image_topic
+        self._browse_images: OrderedDict[str, bytes | None] = OrderedDict()
+        self._browse_image_items: dict[str, tuple[str, str]] = {}
+        self._browse_image_waiters: dict[str, asyncio.Future] = {}
         self._apply_config(config)
         self._attr_unique_id = config["unique_id"]
 
@@ -142,6 +174,10 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
         if "previous" in commands:
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+        if self._browse_folders():
+            features |= MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
+        if "play_media" in commands:
+            features |= MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
         self._attr_supported_features = features
 
     @callback
@@ -149,7 +185,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         """A new config was published for this device."""
         topics_changed = any(
             config.get(key) != self._config.get(key)
-            for key in ("state_topic", "availability_topic", "image_topic")
+            for key in ("state_topic", "availability_topic", "image_topic", "browse_image_topic")
         )
         self._apply_config(config)
         if topics_changed and self.hass is not None:
@@ -190,6 +226,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                     self.hass, topic, self._async_image_received, qos=1, encoding=None
                 )
             )
+        if topic := self._config.get("browse_image_topic"):
+            self._unsubscribe.append(
+                await mqtt.async_subscribe(
+                    self.hass, f"{topic}/+", self._async_browse_image_received, qos=0, encoding=None
+                )
+            )
 
     @callback
     def _async_state_received(self, msg: mqtt.ReceiveMessage) -> None:
@@ -213,6 +255,18 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             payload = payload.encode()
         self._image = payload or None
         self.async_write_ha_state()
+
+    @callback
+    def _async_browse_image_received(self, msg: mqtt.ReceiveMessage) -> None:
+        # Answer to a browse image request, an empty payload means the item has no icon
+        key = msg.topic.rsplit("/", 1)[-1]
+        payload = msg.payload.encode() if isinstance(msg.payload, str) else msg.payload
+        self._browse_images[key] = payload or None
+        self._browse_images.move_to_end(key)
+        while len(self._browse_images) > _BROWSE_IMAGE_CACHE:
+            self._browse_images.popitem(last=False)
+        if (waiter := self._browse_image_waiters.pop(key, None)) is not None and not waiter.done():
+            waiter.set_result(payload or None)
 
     @property
     def media_image_hash(self) -> str | None:
@@ -279,6 +333,25 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         for field in _MEDIA_FIELDS:
             value = s.get(field)
             setattr(self, f"_attr_{field}", value if value not in ("", None) else None)
+
+        # Progress bar, seconds. Home Assistant moves the position from the update time.
+        position = s.get("media_position")
+        duration = s.get("media_duration")
+        if _number(position) and _number(duration) and duration > 0:
+            updated = _timestamp(s.get("media_position_updated_at"))
+            if updated is None:
+                updated = (
+                    self._attr_media_position_updated_at
+                    if position == self._attr_media_position and self._attr_media_position_updated_at
+                    else dt_util.utcnow()
+                )
+            self._attr_media_position = position
+            self._attr_media_duration = duration
+            self._attr_media_position_updated_at = updated
+        else:
+            self._attr_media_position = None
+            self._attr_media_duration = None
+            self._attr_media_position_updated_at = None
 
         # The media card shows app_name as the second line, use it to show the
         # current source and sound mode without opening the selectors.
@@ -372,3 +445,153 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         await self._async_fixed("previous")
+
+    # ----- media browser and play media ------------------------------------
+
+    def _browse_folders(self) -> list[dict[str, Any]]:
+        """Folders from the discovery message, the sources when there are none."""
+        if self._config.get("browse"):
+            return self._config["browse"]
+        if self._config["sources"]:
+            return [{"name": "Sources", "type": "source", "items": self._config["sources"]}]
+        return []
+
+    async def async_browse_media(
+        self, media_content_type: str | None = None, media_content_id: str | None = None
+    ) -> BrowseMedia:
+        folders = self._browse_folders()
+
+        # Home Assistant media sources (TTS, local media) when the device can play urls
+        if media_content_id and media_source.is_media_source_id(media_content_id):
+            return await media_source.async_browse_media(
+                self.hass, media_content_id, content_filter=lambda item: True
+            )
+
+        if media_content_type == _FOLDER and media_content_id is not None:
+            try:
+                folder = folders[int(media_content_id)]
+            except (ValueError, IndexError) as err:
+                raise ServiceValidationError(f"Unknown folder {media_content_id}") from err
+            return self._browse_folder(int(media_content_id), folder, with_children=True)
+
+        children = [self._browse_folder(index, folder) for index, folder in enumerate(folders)]
+        # Home Assistant media sources, only when the device plays urls and a source is available
+        if "play_media" in self._config["commands"]:
+            try:
+                children.append(
+                    await media_source.async_browse_media(self.hass, None, content_filter=lambda item: True)
+                )
+            except BrowseError:
+                pass
+        return BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_id="",
+            media_content_type="root",
+            title=self.device_info.get("name") if self.device_info else "Media",
+            can_play=False,
+            can_expand=True,
+            children=children,
+            children_media_class=MediaClass.DIRECTORY,
+        )
+
+    def _browse_folder(self, index: int, folder: dict[str, Any], with_children: bool = False) -> BrowseMedia:
+        item_class = _BROWSE_CLASSES.get(folder["type"], MediaClass.URL)
+        # Icons from the device are logos (picons, input icons), the frontend fits only app items
+        # into the tile, other classes are cropped to fill it
+        thumbnail_class = MediaClass.APP if self._config.get("browse_image_topic") else item_class
+        children = None
+        if with_children:
+            children = [
+                BrowseMedia(
+                    media_class=thumbnail_class,
+                    media_content_id=str(item["id"]),
+                    media_content_type=folder["type"],
+                    # The current source or channel is marked and has no play button, it already plays
+                    title=f"{_CURRENT} {item['name']}" if self._is_current(item) else item["name"],
+                    can_play=not self._is_current(item),
+                    can_expand=False,
+                    thumbnail=self._browse_thumbnail(folder["type"], item),
+                )
+                for item in folder["items"]
+            ]
+        return BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_id=str(index),
+            media_content_type=_FOLDER,
+            title=f"{_CURRENT} {folder['name']}" if any(self._is_current(item) for item in folder["items"]) else folder["name"],
+            can_play=False,
+            can_expand=True,
+            children=children,
+            children_media_class=item_class,
+        )
+
+    def _is_current(self, item: dict[str, Any]) -> bool:
+        """The item is the source or channel the device reports as current."""
+        source = self._state.get("source")
+        return source is not None and self.state != MediaPlayerState.OFF and str(item["id"]) == str(source)
+
+    def _browse_thumbnail(self, media_type: str, item: dict[str, Any]) -> str | None:
+        """Icon url of an item, through the Home Assistant proxy when the device sends the icons."""
+        if not self._config.get("browse_image_topic"):
+            return item.get("image")
+        # The key keeps ids like SAT/CBL out of the url path, the device uses the same key in the answer
+        key = _browse_image_key(media_type, str(item["id"]))
+        self._browse_image_items[key] = (media_type, str(item["id"]))
+        return self.get_browse_image_url(media_type, key)
+
+    async def async_get_browse_image(
+        self, media_content_type: str, media_content_id: str, media_image_id: str | None = None
+    ) -> tuple[bytes | None, str | None]:
+        key = media_content_id
+        if key in self._browse_images:
+            image = self._browse_images[key]
+            return (image, _image_content_type(image)) if image else (None, None)
+        item = self._browse_image_items.get(key)
+        if item is None or not (topic := self._config.get("browse_image_topic")):
+            return None, None
+
+        waiter = self._browse_image_waiters.get(key)
+        if waiter is None:
+            waiter = self._browse_image_waiters[key] = self.hass.loop.create_future()
+            await self._async_send("BrowseImage", {"type": item[0], "id": item[1], "key": key})
+        try:
+            image = await asyncio.wait_for(asyncio.shield(waiter), _BROWSE_IMAGE_TIMEOUT)
+        except TimeoutError:
+            self._browse_image_waiters.pop(key, None)
+            return None, None
+        return (image, _image_content_type(image)) if image else (None, None)
+
+    async def async_play_media(self, media_type: str, media_id: str, **kwargs: Any) -> None:
+        # Home Assistant media (TTS, local files) is sent as a url
+        if media_source.is_media_source_id(media_id):
+            play_item = await media_source.async_resolve_media(self.hass, media_id, self.entity_id)
+            media_id = async_process_play_media_url(self.hass, play_item.url)
+            media_type = play_item.mime_type
+
+        # A source from the media browser, or a device without play_media, selects the source
+        cmd = self._config["commands"].get("play_media")
+        if media_type == "source" or cmd is None:
+            name = self._source_ids.get(str(media_id))
+            if name is None:
+                raise ServiceValidationError(f"Unknown source: {media_id}")
+            await self.async_select_source(name)
+            return
+        await self._async_send(cmd["key"], {"id": media_id, "type": media_type})
+
+
+def _browse_image_key(media_type: str, media_id: str) -> str:
+    """Topic safe key of a media browser item, the device may compute it or use the one sent."""
+    return hashlib.md5(f"{media_type}:{media_id}".encode(), usedforsecurity=False).hexdigest()
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _timestamp(value: Any) -> datetime | None:
+    """Epoch seconds or an ISO string."""
+    if _number(value):
+        return dt_util.utc_from_timestamp(value)
+    if isinstance(value, str) and value:
+        return dt_util.parse_datetime(value)
+    return None
