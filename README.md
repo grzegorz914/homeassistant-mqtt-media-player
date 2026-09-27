@@ -107,6 +107,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `payload_not_available` | no | Default `offline`. |
 | `device` | no | `identifiers`, `name`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number`, `configuration_url`. |
 | `commands` | no | Action to command key mapping, see below. Actions without a mapping are not offered. |
+| `assumed_state` | no | `true` shows play, pause and stop as separate buttons in the media card (and power on / off), for devices whose play state is not always reported. Without it the frontend shows stop only for devices that cannot pause. |
 | `sources` | no | List of `{ "id", "name", "key"? }`. `id` is sent in the command and reported in the state, `name` is shown in Home Assistant. `key` overrides the command key for this item only (e.g. apps launched with `App`, inputs with `Input`). |
 | `sound_modes` | no | Same format as `sources`. |
 
@@ -178,6 +179,7 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `volume` | In the device scale, converted with `volume_set.min` / `max` (default 0–100). |
 | `muted` | Boolean. |
 | `screen` | Boolean, state of the screen switch. |
+| `volume_control` | `full` (default), `step` or `none`. `step` hides the volume slider and keeps up / down (needs `volume_step`) and mute, e.g. a TV on an optical or HDMI ARC amplifier. `none` hides all volume controls, e.g. line out. |
 | `media_position`, `media_duration` | Seconds, shown as a progress bar. Publish them when the media changes, Home Assistant moves the bar itself. |
 | `media_position_updated_at` | Optional, epoch seconds or ISO time of `media_position`. When omitted the time the position changed is used. |
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |

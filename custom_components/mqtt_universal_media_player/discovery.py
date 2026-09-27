@@ -148,6 +148,9 @@ CONFIG_SCHEMA = vol.Schema(
         vol.Optional("sources", default=list): [ITEM_SCHEMA],
         vol.Optional("sound_modes", default=list): [ITEM_SCHEMA],
         vol.Optional("browse", default=list): [BROWSE_FOLDER_SCHEMA],
+        # The frontend then shows play, pause and stop as separate buttons (and power on / off),
+        # without it stop is only shown for devices that cannot pause
+        vol.Optional("assumed_state", default=False): bool,
     },
     extra=vol.REMOVE_EXTRA,
 )

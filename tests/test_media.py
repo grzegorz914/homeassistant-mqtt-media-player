@@ -190,3 +190,58 @@ async def test_current_item_marked(hass: HomeAssistant, mqtt_mock) -> None:
     await hass.async_block_till_done()
     root = await entity.async_browse_media()
     assert root.children[0].title == "Favourites"
+
+
+async def test_volume_control_from_state(hass: HomeAssistant, mqtt_mock) -> None:
+    lg = {
+        **VU,
+        "commands": {
+            "power": {"key": "Power"},
+            "volume_set": {"key": "Volume"},
+            "volume_step": {"key": "RcControl", "up": "VOLUMEUP", "down": "VOLUMEDOWN"},
+            "mute": {"key": "Mute"},
+        },
+    }
+    await _setup(hass, lg)
+
+    async def features() -> int:
+        await hass.async_block_till_done()
+        return hass.states.get(ENTITY).attributes[ATTR_SUPPORTED_FEATURES]
+
+    # TV speaker, full volume control
+    async_fire_mqtt_message(hass, STATE, json.dumps({"power": True, "volume": 20, "volume_control": "full"}))
+    f = await features()
+    assert f & F.VOLUME_SET and f & F.VOLUME_STEP and f & F.VOLUME_MUTE
+    assert hass.states.get(ENTITY).attributes["volume_level"] == 0.2
+
+    # Optical or ARC amplifier, only up and down, no level
+    async_fire_mqtt_message(hass, STATE, json.dumps({"volume_control": "step"}))
+    f = await features()
+    assert not f & F.VOLUME_SET and f & F.VOLUME_STEP and f & F.VOLUME_MUTE
+    assert "volume_level" not in hass.states.get(ENTITY).attributes
+    mqtt_mock.async_publish.reset_mock()
+    await hass.services.async_call(MP_DOMAIN, "volume_up", {ATTR_ENTITY_ID: ENTITY}, blocking=True)
+    assert _sent(mqtt_mock) == [(COMMAND, {"RcControl": "VOLUMEUP"})]
+
+    # Line out, no volume control
+    async_fire_mqtt_message(hass, STATE, json.dumps({"volume_control": "none"}))
+    f = await features()
+    assert not f & (F.VOLUME_SET | F.VOLUME_STEP | F.VOLUME_MUTE)
+
+
+async def test_volume_step_needs_step_command(hass: HomeAssistant, mqtt_mock) -> None:
+    await _setup(hass, {**VU, "commands": {"power": {"key": "Power"}, "volume_set": {"key": "Volume"}}})
+    async_fire_mqtt_message(hass, STATE, json.dumps({"power": True, "volume_control": "step"}))
+    await hass.async_block_till_done()
+    f = hass.states.get(ENTITY).attributes[ATTR_SUPPORTED_FEATURES]
+    assert not f & (F.VOLUME_SET | F.VOLUME_STEP)
+
+
+async def test_assumed_state_option(hass: HomeAssistant, mqtt_mock) -> None:
+    await _setup(hass, {**VU, "assumed_state": True})
+    assert hass.states.get(ENTITY).attributes.get("assumed_state") is True
+
+
+async def test_no_assumed_state_by_default(hass: HomeAssistant, mqtt_mock) -> None:
+    await _setup(hass, VU)
+    assert "assumed_state" not in hass.states.get(ENTITY).attributes

@@ -178,7 +178,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             features |= MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
         if "play_media" in commands:
             features |= MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
-        self._attr_supported_features = features
+        self._config_features = features
+        self._attr_supported_features = self._state_features()
+        self._attr_assumed_state = config["assumed_state"]
 
     @callback
     def async_update_discovery(self, config: dict[str, Any]) -> None:
@@ -304,9 +306,15 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         else:
             self._attr_state = _STATES.get(reported, MediaPlayerState.ON)
 
+        # The device may limit the volume controls, e.g. a TV on an optical or ARC amplifier
+        # can only step the volume, its level is unknown
+        self._attr_supported_features = self._state_features()
+
         vol_cfg = self._config["commands"].get("volume_set")
         volume = s.get("volume")
-        if isinstance(volume, (int, float)) and not isinstance(volume, bool):
+        if self._state.get("volume_control") in ("step", "none"):
+            self._attr_volume_level = None
+        elif isinstance(volume, (int, float)) and not isinstance(volume, bool):
             vmin = vol_cfg["min"] if vol_cfg else 0
             vmax = vol_cfg["max"] if vol_cfg else 100
             span = vmax - vmin
@@ -445,6 +453,23 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     async def async_media_previous_track(self) -> None:
         await self._async_fixed("previous")
+
+    def _state_features(self) -> MediaPlayerEntityFeature:
+        """Features of the config limited by the volume_control of the state."""
+        features = self._config_features
+        control = self._state.get("volume_control") if hasattr(self, "_state") else None
+        if control == "step":
+            features &= ~MediaPlayerEntityFeature.VOLUME_SET
+            # Up and down without a level need the step command of the device
+            if "volume_step" not in self._config["commands"]:
+                features &= ~MediaPlayerEntityFeature.VOLUME_STEP
+        elif control == "none":
+            features &= ~(
+                MediaPlayerEntityFeature.VOLUME_SET
+                | MediaPlayerEntityFeature.VOLUME_STEP
+                | MediaPlayerEntityFeature.VOLUME_MUTE
+            )
+        return features
 
     # ----- media browser and play media ------------------------------------
 
