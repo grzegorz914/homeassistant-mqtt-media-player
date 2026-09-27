@@ -32,7 +32,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import CONF_SELECTED, DOMAIN
 from .entity import async_setup_discovered, device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,8 +105,12 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Create an entity per discovered device, discovery is subscribed in __init__."""
+    selected = entry.options.get(CONF_SELECTED, {})
     async_setup_discovered(
-        hass, entry, async_add_entities, lambda config: MqttUniversalMediaPlayer(config, entry.entry_id)
+        hass,
+        entry,
+        async_add_entities,
+        lambda config: MqttUniversalMediaPlayer(config, entry.entry_id, selected.get(config["unique_id"])),
     )
 
 
@@ -117,8 +121,10 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
     _attr_name = None
     _attr_should_poll = False
 
-    def __init__(self, config: dict[str, Any], entry_id: str) -> None:
+    def __init__(self, config: dict[str, Any], entry_id: str, selected: list[str] | None = None) -> None:
         self._entry_id = entry_id
+        # Sources, apps and channels chosen in the options, all when None
+        self._selected = {str(item) for item in selected} if selected else None
         self._config: dict[str, Any] = {}
         self._unsubscribe: list = []
         self._available_flag = True
@@ -152,7 +158,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         self._sound_mode_ids = {
             str(item["id"]): item["name"] for item in config["sound_modes"]
         }
-        self._attr_source_list = list(self._sources) or None
+        self._attr_source_list = [
+            name for name, item in self._sources.items() if self._is_selected(item)
+        ] or None
         self._attr_sound_mode_list = list(self._sound_modes) or None
 
         features = MediaPlayerEntityFeature(0)
@@ -586,13 +594,23 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     # ----- media browser and play media ------------------------------------
 
+    def _is_selected(self, item: dict[str, Any]) -> bool:
+        return self._selected is None or str(item["id"]) in self._selected
+
     def _browse_folders(self) -> list[dict[str, Any]]:
-        """Folders from the discovery message, the sources when there are none."""
-        if self._config.get("browse"):
-            return self._config["browse"]
-        if self._config["sources"]:
-            return [{"name": "Sources", "type": "source", "items": self._config["sources"]}]
-        return []
+        """Folders from the discovery message (the sources when there are none) with the selected items."""
+        folders = self._config.get("browse") or (
+            [{"name": "Sources", "type": "source", "items": self._config["sources"]}]
+            if self._config["sources"]
+            else []
+        )
+        if self._selected is None:
+            return folders
+        # Folders keep their index in the browser ids, empty ones are shown empty
+        return [
+            {**folder, "items": [item for item in folder["items"] if self._is_selected(item)]}
+            for folder in folders
+        ]
 
     async def async_browse_media(
         self, media_content_type: str | None = None, media_content_id: str | None = None
@@ -612,7 +630,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                 raise ServiceValidationError(f"Unknown folder {media_content_id}") from err
             return self._browse_folder(int(media_content_id), folder, with_children=True)
 
-        children = [self._browse_folder(index, folder) for index, folder in enumerate(folders)]
+        # Folders without selected items are hidden, the others keep their index
+        children = [
+            self._browse_folder(index, folder)
+            for index, folder in enumerate(folders)
+            if folder["items"] or self._selected is None
+        ]
         # Home Assistant media sources, only when the device plays urls and a source is available
         if "play_media" in self._config["commands"]:
             try:

@@ -10,3 +10,7 @@ DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 PLATFORM_MARKER = DOMAIN
 
 SIGNAL_DISCOVERY = f"{DOMAIN}_discovery"
+
+# Options: ids of the sources, apps and channels shown per device {unique_id: [id, ...]},
+# a device without an entry shows all of them
+CONF_SELECTED = "selected"

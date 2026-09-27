@@ -24,6 +24,7 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 * shuffle and repeat
 * grouping, e.g. the zones of a receiver join the main zone
 * announcements (TTS) for devices that play them over the current media
+* choice of the sources, apps and channels shown per device, like the built-in LG webOS TV integration
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -43,13 +44,15 @@ The [MQTT integration](https://www.home-assistant.io/integrations/mqtt/) must be
 
 ## Configuration
 
-The only option is the **discovery prefix**, `homeassistant` by default. The integration subscribes to:
+The **discovery prefix** is `homeassistant` by default. The integration subscribes to:
 
 ```text
 <discovery_prefix>/media_player/<object_id>/config
 ```
 
 Only messages containing `"platform": "mqtt_universal_media_player"` are handled. Configs published for other media player integrations on the same topic are ignored.
+
+**Sources, apps and channels of a device** (Configure in the integration options), like the sources option of the built-in LG webOS TV integration: choose a device, then the sources, apps and channels shown in the source list, the media browser and the search. Nothing or everything chosen shows all, also the ones the device adds later. The choice is stored in Home Assistant, the device does not need to support it.
 
 ## Supported plugins
 

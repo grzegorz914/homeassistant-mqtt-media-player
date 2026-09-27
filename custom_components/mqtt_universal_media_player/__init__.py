@@ -22,7 +22,7 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import discovery
-from .const import CONF_DISCOVERY_PREFIX, DEFAULT_DISCOVERY_PREFIX, SIGNAL_DISCOVERY
+from .const import CONF_DISCOVERY_PREFIX, DEFAULT_DISCOVERY_PREFIX, DOMAIN, SIGNAL_DISCOVERY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +42,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_DISCOVERY_PREFIX, DEFAULT_DISCOVERY_PREFIX),
     )
     signal = f"{SIGNAL_DISCOVERY}_{entry.entry_id}"
+    # Discovered configs, the options flow lists their devices and items
+    configs: dict[str, dict] = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
+    configs.clear()
 
     @callback
     def _async_discovery(msg: mqtt.ReceiveMessage) -> None:
@@ -50,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Empty retained payload removes the device.
         if not payload or (isinstance(payload, str) and not payload.strip()):
+            configs.pop(object_id, None)
             async_dispatcher_send(hass, signal, object_id, None)
             return
 
@@ -67,6 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.warning("Invalid discovery payload on %s: %s", msg.topic, err)
             return
 
+        configs[object_id] = config
         async_dispatcher_send(hass, signal, object_id, config)
 
     entry.async_on_unload(
@@ -80,7 +85,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    return unloaded
 
 
 async def async_remove_config_entry_device(
@@ -91,5 +99,5 @@ async def async_remove_config_entry_device(
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload after the options (discovery prefix) change."""
+    """Reload after the options (discovery prefix, selected items) change."""
     await hass.config_entries.async_reload(entry.entry_id)

@@ -19,13 +19,37 @@
   "options": {
     "step": {
       "init": {
+        "title": "MQTT Universal Media Player",
+        "menu_options": {
+          "device": "Źródła, aplikacje i kanały urządzenia",
+          "prefix": "Prefiks discovery"
+        }
+      },
+      "prefix": {
         "data": {
           "discovery_prefix": "Prefiks discovery"
+        }
+      },
+      "device": {
+        "title": "Źródła, aplikacje i kanały",
+        "description": "Wybierz urządzenie.",
+        "data": {
+          "device": "Urządzenie"
+        }
+      },
+      "items": {
+        "title": "{device}",
+        "description": "Wybierz źródła, aplikacje i kanały widoczne na liście źródeł, w przeglądarce mediów i w wyszukiwaniu. Gdy nic albo wszystko jest zaznaczone, widać wszystkie, także dodane później do urządzenia.",
+        "data": {
+          "items": "Widoczne"
         }
       }
     },
     "error": {
       "invalid_prefix": "Prefiks nie może być pusty i nie może zawierać znaków + ani #."
+    },
+    "abort": {
+      "no_devices": "Żadne wykryte urządzenie nie ma źródeł, aplikacji ani kanałów."
     }
   },
   "entity": {
