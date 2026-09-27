@@ -111,7 +111,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `payload_not_available` | no | Default `offline`. |
 | `device` | no | `identifiers`, `name`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number`, `configuration_url`. |
 | `commands` | no | Action to command key mapping, see below. Actions without a mapping are not offered. |
-| `assumed_state` | no | `true` shows play, pause and stop as separate buttons in the media card (and power on / off), for devices whose play state is not always reported. Without it the frontend shows stop only for devices that cannot pause. |
+| `assumed_state` | no | `true` shows play, pause and stop as separate buttons in the media card (and power on / off), for devices whose play state is not always reported. Without it the frontend shows stop only for devices that cannot pause. The frontend then also shows separate power on and power off buttons. For stop with a single power button use the `media_stop` control of the Tile card playback feature instead. |
 | `sources` | no | List of `{ "id", "name", "key"? }`. `id` is sent in the command and reported in the state, `name` is shown in Home Assistant. `key` overrides the command key for this item only (e.g. apps launched with `App`, inputs with `Input`). |
 | `sound_modes` | no | Same format as `sources`. |
 | `group` | no | `{ "id", "leader"? }`. Players with the same `id` can be grouped (`media_player.join`), e.g. the zones of one receiver. The leader (`"leader": true`, e.g. the main zone) plays, the members join it with the `join` command. |
@@ -208,6 +208,14 @@ entity: media_player.living_room_tv
 features:
   - type: media-player-volume-slider
   - type: media-player-volume-buttons
+```
+
+A stop button without `assumed_state`:
+
+```yaml
+features:
+  - type: media-player-playback
+    controls: [power, media_previous_track, media_play_pause, media_stop, media_next_track]
 ```
 
 ## Development
