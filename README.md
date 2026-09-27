@@ -20,6 +20,10 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 * optional screen switch and notify entity on the same device, like the built-in LG webOS TV integration
 * progress bar (position and duration)
 * media browser with folders (e.g. bouquets with channels, apps, inputs) and play media, including Home Assistant media sources
+* media search in the sources, channels and apps of the media browser
+* shuffle and repeat
+* grouping, e.g. the zones of a receiver join the main zone
+* announcements (TTS) for devices that play them over the current media
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -110,6 +114,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `assumed_state` | no | `true` shows play, pause and stop as separate buttons in the media card (and power on / off), for devices whose play state is not always reported. Without it the frontend shows stop only for devices that cannot pause. |
 | `sources` | no | List of `{ "id", "name", "key"? }`. `id` is sent in the command and reported in the state, `name` is shown in Home Assistant. `key` overrides the command key for this item only (e.g. apps launched with `App`, inputs with `Input`). |
 | `sound_modes` | no | Same format as `sources`. |
+| `group` | no | `{ "id", "leader"? }`. Players with the same `id` can be grouped (`media_player.join`), e.g. the zones of one receiver. The leader (`"leader": true`, e.g. the main zone) plays, the members join it with the `join` command. |
 
 ### Commands
 
@@ -123,7 +128,10 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `sound_mode` | `{ "key" }` | `{key: sound mode id}` |
 | `play`, `pause`, `play_pause`, `stop`, `next`, `previous` | `{ "key", "value" }` | `{key: value}`, e.g. a remote key code |
 | `screen` | `{ "key" }` | Creates a `Screen` switch on the device. `{key: true}` screen on, `{key: false}` screen off while the sound keeps playing. The state is the `screen` key of the state message. |
-| `play_media` | `{ "key" }` | `{key: {"id": media id, "type": media type}}`, from the `media_player.play_media` action and the media browser. Home Assistant media sources are sent as a url with their mime type. Without it browser items select the source with the same id. |
+| `play_media` | `{ "key", "announce"? }` | `{key: {"id": media id, "type": media type}}`, from the `media_player.play_media` action and the media browser. Home Assistant media sources are sent as a url with their mime type. Without it browser items select the source with the same id. `"announce": true` when the device plays announcements over the current media and returns to it, announcements (e.g. TTS) are then sent with `"announce": true`. |
+| `shuffle` | `{ "key" }` | `{key: true}` / `{key: false}` |
+| `repeat` | `{ "key" }` | `{key: "off"}`, `{key: "all"}` or `{key: "one"}` |
+| `join` | `{ "key" }` | Group member only. `{key: true}` joins the leader of its group, `{key: false}` leaves it (e.g. the zone returns to its previous source). |
 | `notify` | `{ "key" }` | Creates a notify entity on the device (`notify.send_message`). `{key: "message"}`, a title is sent in front of the message as `title: message`. |
 
 `"toggle": true` is for devices that flip the state on every command regardless of the value. The command is then only sent when the requested state differs from the current one.
@@ -183,9 +191,24 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `media_position`, `media_duration` | Seconds, shown as a progress bar. Publish them when the media changes, Home Assistant moves the bar itself. |
 | `media_position_updated_at` | Optional, epoch seconds or ISO time of `media_position`. When omitted the time the position changed is used. |
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |
-| `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name` | Shown in the media card. |
+| `shuffle` | Boolean. `null` hides the shuffle control, e.g. on a source without shuffle. |
+| `repeat` | `off`, `all` or `one`. `null` hides the repeat control. |
+| `joined` | Boolean, a group member follows its leader. |
+| `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name`, `app_id` | Shown in the media card. |
 
 The second line of the media card (`app_name`) shows the current source and sound mode, e.g. `TV Audio · Movie`, so they are visible without opening the selectors. When the device has neither, the `app_name` from the state is shown.
+
+## Volume buttons next to the slider
+
+The more-info dialog shows either the volume slider or the volume up / down buttons. For both, add a Tile card with the `Media player volume slider` and `Media player volume buttons` features (devices with a volume level, with `volume_control` `step` the dialog already shows the buttons):
+
+```yaml
+type: tile
+entity: media_player.living_room_tv
+features:
+  - type: media-player-volume-slider
+  - type: media-player-volume-buttons
+```
 
 ## Development
 

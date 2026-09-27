@@ -19,8 +19,12 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    RepeatMode,
+    SearchMedia,
+    SearchMediaQuery,
     async_process_play_media_url,
 )
+from homeassistant.components.media_player.const import REPEAT_MODES
 from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -28,6 +32,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
+from .const import DOMAIN
 from .entity import async_setup_discovered, device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,7 +58,11 @@ _MEDIA_FIELDS = (
     "media_content_type",
     "media_image_url",
     "app_name",
+    "app_id",
 )
+
+# All players of the integration, the players of a group are found by their group id
+_PLAYERS = f"{DOMAIN}_players"
 
 
 # Media browser classes of the folder types, anything else is a generic item.
@@ -178,6 +187,16 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             features |= MediaPlayerEntityFeature.BROWSE_MEDIA | MediaPlayerEntityFeature.PLAY_MEDIA
         if "play_media" in commands:
             features |= MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
+            if commands["play_media"]["announce"]:
+                features |= MediaPlayerEntityFeature.MEDIA_ANNOUNCE
+        if any(folder["items"] for folder in self._browse_folders()):
+            features |= MediaPlayerEntityFeature.SEARCH_MEDIA
+        if "shuffle" in commands:
+            features |= MediaPlayerEntityFeature.SHUFFLE_SET
+        if "repeat" in commands:
+            features |= MediaPlayerEntityFeature.REPEAT_SET
+        if (group := config.get("group")) and (group["leader"] or "join" in commands):
+            features |= MediaPlayerEntityFeature.GROUPING
         self._config_features = features
         self._attr_supported_features = self._state_features()
         self._attr_assumed_state = config["assumed_state"]
@@ -199,10 +218,13 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
     # ----- MQTT subscriptions ---------------------------------------------
 
     async def async_added_to_hass(self) -> None:
+        self.hass.data.setdefault(_PLAYERS, set()).add(self)
         await self._async_subscribe_topics()
 
     async def async_will_remove_from_hass(self) -> None:
+        self.hass.data.get(_PLAYERS, set()).discard(self)
         self._unsubscribe_topics()
+        self._async_write_group()
 
     def _unsubscribe_topics(self) -> None:
         while self._unsubscribe:
@@ -245,9 +267,13 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         if not isinstance(data, dict):
             return
         # Partial updates are merged, so a device may publish only what changed.
+        joined = self._is_joined()
         self._state.update(data)
         self._update_from_state()
         self.async_write_ha_state()
+        # The group members of the other players of the group changed too
+        if self._is_joined() != joined:
+            self._async_write_group()
 
     @callback
     def _async_image_received(self, msg: mqtt.ReceiveMessage) -> None:
@@ -323,6 +349,11 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             )
         else:
             self._attr_volume_level = None
+
+        shuffle = s.get("shuffle")
+        self._attr_shuffle = shuffle if isinstance(shuffle, bool) else None
+        repeat = str(s.get("repeat", "")).lower()
+        self._attr_repeat = RepeatMode(repeat) if repeat in REPEAT_MODES else None
 
         muted = s.get("muted")
         self._attr_is_volume_muted = muted if isinstance(muted, bool) else None
@@ -469,7 +500,89 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                 | MediaPlayerEntityFeature.VOLUME_STEP
                 | MediaPlayerEntityFeature.VOLUME_MUTE
             )
+        # Null in the state, the current source has no shuffle or repeat (e.g. a HDMI input)
+        state = self._state if hasattr(self, "_state") else {}
+        if "shuffle" in state and state["shuffle"] is None:
+            features &= ~MediaPlayerEntityFeature.SHUFFLE_SET
+        if "repeat" in state and state["repeat"] is None:
+            features &= ~MediaPlayerEntityFeature.REPEAT_SET
         return features
+
+    async def async_set_shuffle(self, shuffle: bool) -> None:
+        await self._async_send(self._command("shuffle")["key"], shuffle)
+
+    async def async_set_repeat(self, repeat: RepeatMode) -> None:
+        await self._async_send(self._command("repeat")["key"], str(repeat))
+
+    # ----- grouping ---------------------------------------------------------
+
+    def _group_players(self) -> list[MqttUniversalMediaPlayer]:
+        """Players with the same group id, this one included."""
+        if (group := self._config.get("group")) is None or self.hass is None:
+            return []
+        return [
+            player
+            for player in self.hass.data.get(_PLAYERS, ())
+            if (other := player._config.get("group")) and other["id"] == group["id"]
+        ]
+
+    def _is_leader(self) -> bool:
+        return bool(self._config.get("group", {}).get("leader"))
+
+    def _is_joined(self) -> bool:
+        """A member that follows the leader."""
+        return (
+            not self._is_leader()
+            and self._state.get("joined") is True
+            and self.state not in (None, MediaPlayerState.OFF)
+        )
+
+    @callback
+    def _async_write_group(self) -> None:
+        for player in self._group_players():
+            if player is not self and player.hass is not None and player.entity_id:
+                player.async_write_ha_state()
+
+    @property
+    def group_members(self) -> list[str] | None:
+        """Leader first, then its joined members, only this player when not grouped."""
+        if self._config.get("group") is None:
+            return None
+        players = self._group_players()
+        leader = next((p for p in players if p._is_leader()), None)
+        joined = sorted(p.entity_id for p in players if p._is_joined())
+        if leader is None or not joined or (self is not leader and not self._is_joined()):
+            return [self.entity_id]
+        return [leader.entity_id, *joined]
+
+    async def async_join_players(self, group_members: list[str]) -> None:
+        players = {p.entity_id: p for p in self._group_players()}
+        if not players:
+            raise ServiceValidationError(f"{self.entity_id} does not support grouping")
+        if unknown := [entity_id for entity_id in group_members if entity_id not in players]:
+            raise ServiceValidationError(
+                f"{', '.join(unknown)} cannot be grouped with {self.entity_id}"
+            )
+        selected = [players[entity_id] for entity_id in dict.fromkeys([self.entity_id, *group_members])]
+        if not any(player._is_leader() for player in selected):
+            raise ServiceValidationError(
+                f"{self.entity_id} can only be grouped together with the leader of its group"
+            )
+        for player in selected:
+            if not player._is_leader() and not player._is_joined():
+                await player._async_join(True)
+
+    async def async_unjoin_player(self) -> None:
+        # The leader ends the group, a member leaves it
+        if self._is_leader():
+            for player in self._group_players():
+                if player._is_joined():
+                    await player._async_join(False)
+            return
+        await self._async_join(False)
+
+    async def _async_join(self, join: bool) -> None:
+        await self._async_send(self._command("join")["key"], join)
 
     # ----- media browser and play media ------------------------------------
 
@@ -521,24 +634,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     def _browse_folder(self, index: int, folder: dict[str, Any], with_children: bool = False) -> BrowseMedia:
         item_class = _BROWSE_CLASSES.get(folder["type"], MediaClass.URL)
-        # Icons from the device are logos (picons, input icons), the frontend fits only app items
-        # into the tile, other classes are cropped to fill it
-        thumbnail_class = MediaClass.APP if self._config.get("browse_image_topic") else item_class
         children = None
         if with_children:
-            children = [
-                BrowseMedia(
-                    media_class=thumbnail_class,
-                    media_content_id=str(item["id"]),
-                    media_content_type=folder["type"],
-                    # The current source or channel is marked and has no play button, it already plays
-                    title=f"{_CURRENT} {item['name']}" if self._is_current(item) else item["name"],
-                    can_play=not self._is_current(item),
-                    can_expand=False,
-                    thumbnail=self._browse_thumbnail(folder["type"], item),
-                )
-                for item in folder["items"]
-            ]
+            children = [self._browse_item(folder, item) for item in folder["items"]]
         return BrowseMedia(
             media_class=MediaClass.DIRECTORY,
             media_content_id=str(index),
@@ -549,6 +647,39 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             children=children,
             children_media_class=item_class,
         )
+
+    def _browse_item(self, folder: dict[str, Any], item: dict[str, Any]) -> BrowseMedia:
+        item_class = _BROWSE_CLASSES.get(folder["type"], MediaClass.URL)
+        # Icons from the device are logos (picons, input icons), the frontend fits only app items
+        # into the tile, other classes are cropped to fill it
+        thumbnail_class = MediaClass.APP if self._config.get("browse_image_topic") else item_class
+        return BrowseMedia(
+            media_class=thumbnail_class,
+            media_content_id=str(item["id"]),
+            media_content_type=folder["type"],
+            # The current source or channel is marked and has no play button, it already plays
+            title=f"{_CURRENT} {item['name']}" if self._is_current(item) else item["name"],
+            can_play=not self._is_current(item),
+            can_expand=False,
+            thumbnail=self._browse_thumbnail(folder["type"], item),
+        )
+
+    async def async_search_media(self, query: SearchMediaQuery) -> SearchMedia:
+        """Sources, channels and apps of the media browser with the text in their name."""
+        text = query.search_query.casefold().strip()
+        result: list[BrowseMedia] = []
+        found: set[tuple[str, str]] = set()
+        for folder in self._browse_folders():
+            for item in folder["items"]:
+                ident = (folder["type"], str(item["id"]))
+                if ident in found or text not in item["name"].casefold():
+                    continue
+                media = self._browse_item(folder, item)
+                if query.media_filter_classes and media.media_class not in query.media_filter_classes:
+                    continue
+                found.add(ident)
+                result.append(media)
+        return SearchMedia(result=result)
 
     def _is_current(self, item: dict[str, Any]) -> bool:
         """The item is the source or channel the device reports as current."""
@@ -601,7 +732,10 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                 raise ServiceValidationError(f"Unknown source: {media_id}")
             await self.async_select_source(name)
             return
-        await self._async_send(cmd["key"], {"id": media_id, "type": media_type})
+        payload = {"id": media_id, "type": media_type}
+        if kwargs.get("announce") and cmd["announce"]:
+            payload["announce"] = True
+        await self._async_send(cmd["key"], payload)
 
 
 def _browse_image_key(media_type: str, media_id: str) -> str:

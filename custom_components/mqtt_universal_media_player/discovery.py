@@ -83,6 +83,24 @@ DEVICE_SCHEMA = vol.Schema(
 # Key only command, the entity supplies the value (screen on/off, notification text).
 KEY_SCHEMA = vol.Schema({vol.Required("key"): str})
 
+# "announce": the device plays announcements (TTS) over the current media and returns
+# to it, the command then carries "announce": true
+PLAY_MEDIA_SCHEMA = vol.Schema(
+    {
+        vol.Required("key"): str,
+        vol.Optional("announce", default=False): bool,
+    }
+)
+
+# Players with the same group id can be grouped, e.g. the zones of one receiver.
+# The leader plays, the members join it (zone source follows the main zone).
+GROUP_SCHEMA = vol.Schema(
+    {
+        vol.Required("id"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("leader", default=False): bool,
+    }
+)
+
 COMMANDS_SCHEMA = vol.Schema(
     {
         vol.Optional("power"): COMMAND_SCHEMA,
@@ -102,7 +120,14 @@ COMMANDS_SCHEMA = vol.Schema(
         vol.Optional("screen"): KEY_SCHEMA,
         vol.Optional("notify"): KEY_SCHEMA,
         # play_media service and media browser items: {key: {"id": ..., "type": ...}}
-        vol.Optional("play_media"): KEY_SCHEMA,
+        vol.Optional("play_media"): PLAY_MEDIA_SCHEMA,
+        # Shuffle {key: true/false} and repeat {key: "off"/"all"/"one"}, state fields
+        # "shuffle" and "repeat", a null state value hides the control
+        vol.Optional("shuffle"): KEY_SCHEMA,
+        vol.Optional("repeat"): KEY_SCHEMA,
+        # Group member joins the leader of its group {key: true}, leaves it {key: false},
+        # state field "joined"
+        vol.Optional("join"): KEY_SCHEMA,
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -151,6 +176,7 @@ CONFIG_SCHEMA = vol.Schema(
         # The frontend then shows play, pause and stop as separate buttons (and power on / off),
         # without it stop is only shown for devices that cannot pause
         vol.Optional("assumed_state", default=False): bool,
+        vol.Optional("group"): GROUP_SCHEMA,
     },
     extra=vol.REMOVE_EXTRA,
 )
