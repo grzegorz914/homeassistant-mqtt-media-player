@@ -6,25 +6,36 @@
 
 A Home Assistant custom integration that creates **one full `media_player` entity** from a **single retained MQTT discovery message**.
 
-The built-in MQTT integration does not support `media_player` discovery. This integration fills that gap. It supports:
+The built-in MQTT integration does not support `media_player` discovery. This integration fills that gap.
 
-* device class `tv`, `receiver`, `speaker` or `projector`
-* power on / off
-* volume set, volume up / down
-* mute
-* source selection
-* sound mode selection
-* play / pause / stop / next / previous
-* media information (title, artist, channel, app, artwork)
-* source icon or channel picon from a raw image topic
-* optional screen switch and notify entity on the same device, like the built-in LG webOS TV integration
-* progress bar (position and duration)
-* media browser with folders (e.g. bouquets with channels, apps, inputs) and play media, including Home Assistant media sources
-* media search in the sources, channels and apps of the media browser
+## What it offers
+
+**The entity.** One `media_player` with its device in the device registry (name, manufacturer, model, software version). The device class is `tv`, `receiver`, `speaker` or `projector`. The entity is unavailable until the device reports online (`availability_topic`) and the retained discovery message can be published again at any time to update it, or emptied to remove the entity and its device.
+
+**Controls.** Each is offered only when the discovery message maps its command, so a device shows just what it can do:
+
+* power on / off, also for devices that flip the state on every command (`toggle`)
+* volume set, volume up / down (a device that can only step the volume gets up / down without the slider) and mute
+* source selection and sound mode selection, with the names shown in Home Assistant mapped to the ids the device uses, and a different command key per item, e.g. apps launched with their own key
+* play, pause, stop, next and previous
 * shuffle and repeat
+* `media_player.play_media` and announcements (TTS) for devices that play them over the current media and return to it, with Home Assistant media sources sent as a url
 * grouping, e.g. the zones of a receiver join the main zone
-* announcements (TTS) for devices that play them over the current media
-* choice of the sources, apps and channels shown per device, like the built-in LG webOS TV integration
+
+**What the device reports.** The state message carries power, play state, volume, mute, source, sound mode, the media information (title, artist, album, series, channel, content type, artwork, app name and id), a progress bar (position and duration) and the state of the screen. It can also take controls away while they make no sense:
+
+* `volume_control` `step` or `none` hides the volume slider or all volume controls
+* `shuffle` or `repeat` `null` hides that control, e.g. on an input with none
+* `pausable` `false` hides play and pause, `stoppable` `false` hides stop, e.g. while live TV plays
+* `sound_mode_list` `channels` lists the channels of the media browser in the sound mode selector instead of the sound modes
+
+**Artwork.** An image url in the state, or the raw image bytes of the current source (an app icon, a channel picon) on `image_topic`.
+
+**Media browser and search.** Folders from the discovery message, such as inputs, apps and channels or bouquets, with thumbnails shown whole in square tiles. The current source or channel is marked and has no play button. The browser and the search also cover Home Assistant media sources when the device plays urls. Icons the device must fetch itself can be sent through `browse_image_topic`.
+
+**Extra entities on the same device.** An optional screen switch and a notify entity, like the built-in LG webOS TV integration.
+
+**Choice of what is shown.** In the integration options, per device, the sources, apps and channels shown in the source list, the media browser and the search, like the built-in LG webOS TV integration. The device does not need to support it.
 
 Devices do not need any new command handling. The discovery message maps each action to a command key the device already understands on its existing command topic.
 
@@ -60,8 +71,20 @@ Only messages containing `"platform": "mqtt_universal_media_player"` are handled
 * [homebridge-openwebif-tv](https://github.com/grzegorz914/homebridge-openwebif-tv), class `receiver`
 * [homebridge-xbox-tv](https://github.com/grzegorz914/homebridge-xbox-tv), class `receiver`
 * [homebridge-lgwebos-tv](https://github.com/grzegorz914/homebridge-lgwebos-tv), class `tv`
+* [Glasshouse](https://github.com/rorygallagher2024/glasshouse), the app on LG webOS TVs, class `tv`, with the Internet TV channels in the media browser and the programme on now
 
 Enable **MQTT → HA Discovery** in the plugin settings.
+
+## Tested with
+
+Run against these TVs, with Home Assistant 2026.11:
+
+| Model | webOS | Firmware |
+| --- | --- | --- |
+| OLED48C31LA | 11.2.0 | 44.00.92 |
+| OLED48CX8LC | 5.6.2 | 04.74.00 |
+| 32LM6300PLA | 4.10.2 | 05.40.97 |
+| 49SK8500PLA | 4.4.3 | 05.50.70 |
 
 ## Discovery message
 
@@ -160,7 +183,7 @@ The screen switch and the notify entity are unavailable while the device is off 
 | `type` | Sent as the media type with `play_media` (`channel`, `app`, `video`, `music`...). `source` (default) selects the source with the item id. |
 | `items` | `id`, `name` and an optional `image` url shown as the thumbnail. |
 
-The item whose `id` is the current `source` of the state message is marked with `●`, has no play button, and its folder is marked too.
+The item whose `id` is the current `source` of the state message is marked with `●`, has no play button, and its folder is marked too. While `sound_mode_list` is `channels` the current channel of the `channel` folders is the `sound_mode`. Folders whose items have an `image` show it whole in square tiles.
 
 Devices whose icons Home Assistant cannot load itself (self signed certificate, password, icons bundled with the device software) set `browse_image_topic` in the discovery message. The integration then sends `{"BrowseImage": {"type": ..., "id": ..., "key": ...}}` on the command topic when an icon is shown and the device answers with the image bytes (not retained) on `<browse_image_topic>/<key>`, an empty payload when the item has no icon. Answers are cached.
 
@@ -196,10 +219,14 @@ JSON published on `state_topic`. Every key is optional and partial updates are m
 | `source`, `sound_mode` | The item `id`. Unknown ids are shown as is. |
 | `shuffle` | Boolean. `null` hides the shuffle control, e.g. on a source without shuffle. |
 | `repeat` | `off`, `all` or `one`. `null` hides the repeat control. |
+| `pausable` | Boolean. `false` hides play and pause, e.g. on live TV that cannot be paused. |
+| `stoppable` | Boolean. `false` hides stop, e.g. on live TV that has no stop. |
+| `sound_mode_list` | `channels` lists the channels of the media browser (folders of type `channel`) in the sound mode selector instead of the sound modes. `sound_mode` is then the id of the current channel and `sound_mode_current` the id of the sound mode in use. Needs `play_media`. |
+| `sound_mode_current` | The id of the sound mode in use. Only read while `sound_mode_list` is `channels`, for the second line of the media card. |
 | `joined` | Boolean, a group member follows its leader. |
 | `media_title`, `media_artist`, `media_album_name`, `media_series_title`, `media_channel`, `media_content_type`, `media_image_url`, `app_name`, `app_id` | Shown in the media card. |
 
-The second line of the media card (`app_name`) shows the current source and sound mode, e.g. `TV Audio · Movie`, so they are visible without opening the selectors. When the device has neither, the `app_name` from the state is shown.
+The second line of the media card (`app_name`) shows the current source and sound mode, e.g. `TV Audio · Movie`, so they are visible without opening the selectors. While the channels are listed as sound modes it shows the source and `sound_mode_current` instead. When the device has neither, the `app_name` from the state is shown.
 
 ## Volume buttons next to the slider
 

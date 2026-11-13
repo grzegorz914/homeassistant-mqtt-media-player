@@ -371,11 +371,18 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             self._source_ids.get(str(source), str(source)) if source is not None else None
         )
         sound_mode = s.get("sound_mode")
-        self._attr_sound_mode = (
-            self._sound_mode_ids.get(str(sound_mode), str(sound_mode))
-            if sound_mode is not None
-            else None
-        )
+        channels = self._channels()
+        if channels is not None:
+            # The channels of the browser take the place of the sound modes, the state's sound mode is the channel id
+            self._attr_sound_mode_list = list(channels[0])
+            self._attr_sound_mode = channels[1].get(str(sound_mode)) if sound_mode is not None else None
+        else:
+            self._attr_sound_mode_list = list(self._sound_modes) or None
+            self._attr_sound_mode = (
+                self._sound_mode_ids.get(str(sound_mode), str(sound_mode))
+                if sound_mode is not None
+                else None
+            )
 
         for field in _MEDIA_FIELDS:
             value = s.get(field)
@@ -402,7 +409,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
         # The media card shows app_name as the second line, use it to show the
         # current source and sound mode without opening the selectors.
-        current = " · ".join(v for v in (self._attr_source, self._attr_sound_mode) if v)
+        sound_label = self._attr_sound_mode
+        if channels is not None:
+            # The selector lists channels, the line shows the sound mode the state says is in use
+            real = s.get("sound_mode_current")
+            sound_label = self._sound_mode_ids.get(str(real), str(real)) if real is not None else None
+        current = " · ".join(v for v in (self._attr_source, sound_label) if v)
         if current:
             self._attr_app_name = current
 
@@ -461,7 +473,33 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         await self._async_select(source, self._sources, "source")
 
     async def async_select_sound_mode(self, sound_mode: str) -> None:
+        if (channels := self._channels()) is not None:
+            if (channel_id := channels[0].get(sound_mode)) is None:
+                raise ServiceValidationError(f"Unknown channel: {sound_mode}")
+            await self.async_play_media("channel", channel_id)
+            return
         await self._async_select(sound_mode, self._sound_modes, "sound_mode")
+
+    def _channels(self) -> tuple[dict[str, str], dict[str, str]] | None:
+        """Names to ids and ids to names of the channels, while the state's sound_mode_list is "channels".
+
+        A device that plays a channel has no use for its sound modes in the selector, it lists the
+        channels of the media browser there instead. Equal names get a number.
+        """
+        if self._state.get("sound_mode_list") != "channels" or "play_media" not in self._config["commands"]:
+            return None
+        by_name: dict[str, str] = {}
+        by_id: dict[str, str] = {}
+        for folder in self._browse_folders():
+            if folder["type"] != "channel":
+                continue
+            for item in folder["items"]:
+                name, number = item["name"], 2
+                while name in by_name:
+                    name, number = f"{item['name']} ({number})", number + 1
+                by_name[name] = str(item["id"])
+                by_id[str(item["id"])] = name
+        return (by_name, by_id) if by_name else None
 
     async def _async_select(
         self, name: str, items: dict[str, dict[str, Any]], command: str
@@ -514,6 +552,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             features &= ~MediaPlayerEntityFeature.SHUFFLE_SET
         if "repeat" in state and state["repeat"] is None:
             features &= ~MediaPlayerEntityFeature.REPEAT_SET
+        # False in the state, what plays cannot be paused (e.g. live TV without a recording)
+        if state.get("pausable") is False:
+            features &= ~(MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.PLAY)
+        # False in the state, what plays cannot be stopped
+        if state.get("stoppable") is False:
+            features &= ~MediaPlayerEntityFeature.STOP
         return features
 
     async def async_set_shuffle(self, shuffle: bool) -> None:
@@ -657,6 +701,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     def _browse_folder(self, index: int, folder: dict[str, Any], with_children: bool = False) -> BrowseMedia:
         item_class = _BROWSE_CLASSES.get(folder["type"], MediaClass.URL)
+        # Logos and icons of the device are shown whole in square tiles, the other classes crop them
+        if any(item.get("image") for item in folder["items"]):
+            item_class = MediaClass.APP
         children = None
         if with_children:
             children = [self._browse_item(folder, item) for item in folder["items"]]
@@ -664,7 +711,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             media_class=MediaClass.DIRECTORY,
             media_content_id=str(index),
             media_content_type=_FOLDER,
-            title=f"{_CURRENT} {folder['name']}" if any(self._is_current(item) for item in folder["items"]) else folder["name"],
+            title=f"{_CURRENT} {folder['name']}" if any(self._is_current(item, folder["type"]) for item in folder["items"]) else folder["name"],
             can_play=False,
             can_expand=True,
             children=children,
@@ -675,14 +722,14 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         item_class = _BROWSE_CLASSES.get(folder["type"], MediaClass.URL)
         # Icons from the device are logos (picons, input icons), the frontend fits only app items
         # into the tile, other classes are cropped to fill it
-        thumbnail_class = MediaClass.APP if self._config.get("browse_image_topic") else item_class
+        thumbnail_class = MediaClass.APP if self._config.get("browse_image_topic") or item.get("image") else item_class
         return BrowseMedia(
             media_class=thumbnail_class,
             media_content_id=str(item["id"]),
             media_content_type=folder["type"],
             # The current source or channel is marked and has no play button, it already plays
-            title=f"{_CURRENT} {item['name']}" if self._is_current(item) else item["name"],
-            can_play=not self._is_current(item),
+            title=f"{_CURRENT} {item['name']}" if self._is_current(item, folder["type"]) else item["name"],
+            can_play=not self._is_current(item, folder["type"]),
             can_expand=False,
             thumbnail=self._browse_thumbnail(folder["type"], item),
         )
@@ -704,9 +751,12 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
                 result.append(media)
         return SearchMedia(result=result)
 
-    def _is_current(self, item: dict[str, Any]) -> bool:
+    def _is_current(self, item: dict[str, Any], folder_type: str | None = None) -> bool:
         """The item is the source or channel the device reports as current."""
         source = self._state.get("source")
+        # While the channels are listed as sound modes, the sound mode is the current channel
+        if folder_type == "channel" and self._channels() is not None:
+            source = self._state.get("sound_mode")
         return source is not None and self.state != MediaPlayerState.OFF and str(item["id"]) == str(source)
 
     def _browse_thumbnail(self, media_type: str, item: dict[str, Any]) -> str | None:

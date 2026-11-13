@@ -115,6 +115,71 @@ async def test_shuffle_and_repeat(hass: HomeAssistant, mqtt_mock) -> None:
     assert ATTR_MEDIA_SHUFFLE not in hass.states.get("media_player.salon").attributes
 
 
+async def test_pausable(hass: HomeAssistant, mqtt_mock) -> None:
+    player = {**MAIN, "commands": {**MAIN["commands"], "play": {"key": "Play"}, "pause": {"key": "Pause"}}}
+    await _setup(hass, player)
+    await _state(hass, MAIN, {"power": True, "state": "playing"})
+    assert {F.PLAY, F.PAUSE} <= set(_features(hass, "media_player.salon"))
+
+    # False, what plays cannot be paused
+    await _state(hass, MAIN, {"pausable": False})
+    assert F.PLAY not in _features(hass, "media_player.salon")
+    assert F.PAUSE not in _features(hass, "media_player.salon")
+
+    # Null or true, back again
+    await _state(hass, MAIN, {"pausable": None})
+    assert {F.PLAY, F.PAUSE} <= set(_features(hass, "media_player.salon"))
+
+
+async def test_channels_as_sound_modes(hass: HomeAssistant, mqtt_mock) -> None:
+    player = {
+        **MAIN,
+        "commands": {**MAIN["commands"], "play_media": {"key": "PlayMedia"}, "sound_mode": {"key": "Mode"}},
+        "sound_modes": [{"id": "tv", "name": "TV Speaker"}],
+        "browse": [{"name": "Channels", "type": "channel", "items": [{"id": "a", "name": "One"}, {"id": "b", "name": "One"}]}],
+    }
+    await _setup(hass, player)
+    await _state(hass, MAIN, {"power": True, "sound_mode": "tv"})
+    attrs = hass.states.get("media_player.salon").attributes
+    assert attrs["sound_mode_list"] == ["TV Speaker"]
+    assert attrs["sound_mode"] == "TV Speaker"
+
+    await _state(hass, MAIN, {"sound_mode_list": "channels", "sound_mode": "b"})
+    attrs = hass.states.get("media_player.salon").attributes
+    assert attrs["sound_mode_list"] == ["One", "One (2)"]
+    assert attrs["sound_mode"] == "One (2)"
+
+    # The playing channel is marked in the media browser
+    entity = entity_component.EntityComponent.get_entity(hass.data[MP_DOMAIN], "media_player.salon")
+    folder = await entity.async_browse_media("folder", "0")
+    assert [child.can_play for child in folder.children] == [True, False]
+    assert folder.children[1].title.startswith("●")
+
+    await _state(hass, MAIN, {"sound_mode_current": "tv", "source": "SINET"})
+    assert hass.states.get("media_player.salon").attributes["app_name"].endswith("TV Speaker")
+
+    mqtt_mock.async_publish.reset_mock()
+    await _call(hass, "select_sound_mode", {ATTR_ENTITY_ID: "media_player.salon", "sound_mode": "One"})
+    assert _sent(mqtt_mock) == [("denon/Salon/Set", {"PlayMedia": {"id": "a", "type": "channel"}})]
+
+    await _state(hass, MAIN, {"sound_mode_list": None, "sound_mode": "tv"})
+    assert hass.states.get("media_player.salon").attributes["sound_mode_list"] == ["TV Speaker"]
+
+
+async def test_stoppable(hass: HomeAssistant, mqtt_mock) -> None:
+    player = {**MAIN, "commands": {**MAIN["commands"], "stop": {"key": "Stop"}}}
+    await _setup(hass, player)
+    await _state(hass, MAIN, {"power": True, "state": "playing"})
+    assert F.STOP in _features(hass, "media_player.salon")
+
+    # False, what plays cannot be stopped
+    await _state(hass, MAIN, {"stoppable": False})
+    assert F.STOP not in _features(hass, "media_player.salon")
+
+    await _state(hass, MAIN, {"stoppable": None})
+    assert F.STOP in _features(hass, "media_player.salon")
+
+
 async def test_app_id(hass: HomeAssistant, mqtt_mock) -> None:
     await _setup(hass, MAIN)
     await _state(hass, MAIN, {"power": True, "app_id": "netflix"})
