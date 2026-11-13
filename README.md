@@ -10,11 +10,11 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 
 ## What it offers
 
-**The entity.** One `media_player` with its device in the device registry (name, manufacturer, model, software version). The device class is `tv`, `receiver`, `speaker` or `projector`. The entity is unavailable until the device reports online (`availability_topic`) and the retained discovery message can be published again at any time to update it, or emptied to remove the entity and its device.
+**The entity.** One `media_player` with its device in the device registry (name, manufacturer, model, software version). The device class is `tv`, `receiver`, `speaker` or `projector`. The entity is unavailable until the device reports online (`availability_topic`), unless a `mac` address is given, in which case `turn_on` wakes the device with Wake-on-LAN instead. The retained discovery message can be published again at any time to update it, or emptied to remove the entity and its device.
 
 **Controls.** Each is offered only when the discovery message maps its command, so a device shows just what it can do:
 
-* power on / off, also for devices that flip the state on every command (`toggle`)
+* power on / off, also for devices that flip the state on every command (`toggle`), with Wake-on-LAN for turning one on while it is unreachable (`mac`)
 * volume set, volume up / down (a device that can only step the volume gets up / down without the slider) and mute
 * source selection and sound mode selection, with the names shown in Home Assistant mapped to the ids the device uses, and a different command key per item, e.g. apps launched with their own key
 * play, pause, stop, next and previous
@@ -131,7 +131,8 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `command_topic` | yes | Commands are published here as `{"<key>": <value>}`. |
 | `name` | no | Entity name. When omitted the entity uses the device name. |
 | `device_class` | no | `tv`, `receiver`, `speaker` or `projector`. |
-| `availability_topic` | no | When set, the entity is unavailable until `payload_available` is received. |
+| `availability_topic` | no | When set, the entity is unavailable until `payload_available` is received, unless `mac` is also set. |
+| `mac` | no | The device's MAC address. While `availability_topic` reports it unreachable, the entity stays available and `turn_on` sends a Wake-on-LAN magic packet instead of the usual command. |
 | `image_topic` | no | Topic with the raw image bytes (PNG, JPEG, GIF, WebP or SVG) of the current source, e.g. an app icon or a channel picon. Publish it retained when the source changes, an empty payload clears it. The image is shown in the media card. |
 | `payload_available` | no | Default `online`. |
 | `payload_not_available` | no | Default `offline`. |

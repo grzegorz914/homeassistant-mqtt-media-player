@@ -239,6 +239,12 @@ def test_magic_packet_contents() -> None:
         assert packet == b"\xff" * 6 + bytes.fromhex("AABBCCDDEEFF") * 16
 
 
+async def test_mac_shown_as_a_connection(hass: HomeAssistant, mqtt_mock) -> None:
+    await _setup(hass, mqtt_mock)
+    await _discover(hass, {**DENON, "mac": "aa:bb:cc:dd:ee:ff"})
+    assert _device(hass).connections == {("mac", "aa:bb:cc:dd:ee:ff")}
+
+
 async def test_wake_on_lan_while_unavailable(hass: HomeAssistant, mqtt_mock, monkeypatch) -> None:
     """A MAC address keeps the entity available and turns turn_on into Wake-on-LAN."""
     cfg = {**DENON, "availability_topic": "denon/Denon AVR/Available", "mac": "AA:BB:CC:DD:EE:FF"}

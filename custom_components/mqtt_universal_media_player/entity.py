@@ -27,6 +27,10 @@ def device_info(config: dict[str, Any]) -> DeviceInfo:
     identifiers = device.get("identifiers") or [config["unique_id"]]
     return DeviceInfo(
         identifiers={(DOMAIN, ident) for ident in identifiers},
+        # Shown on the device page; Home Assistant 2026.8+ keeps a device to
+        # one config entry, so this does not merge with another integration's
+        # device for the same physical device even when its MAC matches.
+        connections={("mac", config["mac"])} if config.get("mac") else set(),
         name=device.get("name") or config.get("name") or config["unique_id"],
         manufacturer=device.get("manufacturer"),
         model=device.get("model"),
