@@ -35,7 +35,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_SELECTED, DOMAIN
-from .entity import async_setup_discovered, device_info
+from .entity import async_setup_discovered, device_info, matches
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -335,9 +335,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     @callback
     def _async_availability_received(self, msg: mqtt.ReceiveMessage) -> None:
-        if msg.payload == self._config["payload_available"]:
+        if matches(msg.payload, self._config["payload_available"]):
             self._available_flag = True
-        elif msg.payload == self._config["payload_not_available"]:
+        elif matches(msg.payload, self._config["payload_not_available"]):
             self._available_flag = False
         else:
             return
@@ -351,10 +351,15 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         return self._available_flag or bool(self._config.get("mac"))
 
     def _update_from_state(self) -> None:
-        # Unreachable, kept available only for Wake-on-LAN: shown as off, with
-        # the last retained state's source and media info left behind rather
-        # than shown as current.
-        if not self._available_flag and self._config.get("mac"):
+        s = self._state
+        power = s.get("power")
+        reported = str(s.get("state", "")).lower()
+        # Unreachable (kept available only for Wake-on-LAN) counts as off too:
+        # its last retained source and media info are no longer current either.
+        unreachable = not self._available_flag and bool(self._config.get("mac"))
+        if unreachable or power is False or reported == "off":
+            # A powered-off device has nothing to change the volume or source
+            # of, or media to control, whether or not it would still answer.
             self._attr_state = MediaPlayerState.OFF
             self._attr_volume_level = None
             self._attr_is_volume_muted = None
@@ -372,12 +377,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             )
             return
 
-        s = self._state
-        power = s.get("power")
-        reported = str(s.get("state", "")).lower()
-        if power is False or reported == "off":
-            self._attr_state = MediaPlayerState.OFF
-        elif power is None and not reported:
+        if power is None and not reported:
             self._attr_state = None
         else:
             self._attr_state = _STATES.get(reported, MediaPlayerState.ON)

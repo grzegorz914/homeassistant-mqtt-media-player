@@ -21,6 +21,11 @@ from .const import DOMAIN, SIGNAL_DISCOVERY
 _LOGGER = logging.getLogger(__name__)
 
 
+def matches(payload: str, expected: str | list[str]) -> bool:
+    """True when payload equals expected, or is one of its list of readings."""
+    return payload in expected if isinstance(expected, list) else payload == expected
+
+
 def device_info(config: dict[str, Any]) -> DeviceInfo:
     """Device of a discovered media player, shared by all its entities."""
     device = config["device"]
@@ -171,9 +176,9 @@ class DiscoveredEntity(Entity):
 
     @callback
     def _async_availability_received(self, msg: mqtt.ReceiveMessage) -> None:
-        if msg.payload == self._config["payload_available"]:
+        if matches(msg.payload, self._config["payload_available"]):
             self._available_flag = True
-        elif msg.payload == self._config["payload_not_available"]:
+        elif matches(msg.payload, self._config["payload_not_available"]):
             self._available_flag = False
         else:
             return

@@ -128,7 +128,15 @@ async def test_state_updates_and_partial_merge(hass: HomeAssistant, mqtt_mock) -
 
     async_fire_mqtt_message(hass, DENON["state_topic"], json.dumps({"power": False}))
     await hass.async_block_till_done()
-    assert hass.states.get(ENTITY).state == "off"
+    state = hass.states.get(ENTITY)
+    assert state.state == "off"
+    # Off has nothing to change the volume or source of, whether or not the
+    # device would still answer - only power is left.
+    assert ATTR_INPUT_SOURCE not in state.attributes
+    assert ATTR_SOUND_MODE not in state.attributes
+    assert ATTR_MEDIA_VOLUME_LEVEL not in state.attributes
+    assert ATTR_MEDIA_VOLUME_MUTED not in state.attributes
+    assert F(state.attributes[ATTR_SUPPORTED_FEATURES]) == F.TURN_ON | F.TURN_OFF
 
 
 async def test_commands_use_device_keys(hass: HomeAssistant, mqtt_mock) -> None:
@@ -284,6 +292,30 @@ async def test_wake_on_lan_while_unavailable(hass: HomeAssistant, mqtt_mock, mon
     await _service(hass, "turn_on")
     assert sent == ["AA:BB:CC:DD:EE:FF"], "turn_on uses the normal command once the device answers again"
     assert _sent(mqtt_mock) == [(DENON["command_topic"], {"Power": True})]
+
+
+async def test_availability_as_a_list(hass: HomeAssistant, mqtt_mock) -> None:
+    """A device whose dropped connection can read more than one way, e.g. a
+    clean sleep and an unexpected one, lists them all in payload_not_available."""
+    cfg = {
+        **DENON,
+        "availability_topic": "denon/Denon AVR/Available",
+        "payload_not_available": ["offline", "asleep"],
+    }
+    await _setup(hass, mqtt_mock)
+    await _discover(hass, cfg)
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).state != "unavailable"
+
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "asleep")
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).state == "unavailable"
+
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "offline")
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).state == "unavailable"
 
 
 async def test_foreign_and_invalid_payloads_ignored(hass: HomeAssistant, mqtt_mock) -> None:

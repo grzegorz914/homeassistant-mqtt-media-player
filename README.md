@@ -10,7 +10,7 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 
 ## What it offers
 
-**The entity.** One `media_player` with its device in the device registry (name, manufacturer, model, software version). The device class is `tv`, `receiver`, `speaker` or `projector`. The entity is unavailable until the device reports online (`availability_topic`), unless a `mac` address is given, in which case `turn_on` wakes the device with Wake-on-LAN instead. The retained discovery message can be published again at any time to update it, or emptied to remove the entity and its device.
+**The entity.** One `media_player` with its device in the device registry (name, manufacturer, model, software version). The device class is `tv`, `receiver`, `speaker` or `projector`. The entity is unavailable until the device reports online (`availability_topic`), unless a `mac` address is given, in which case `turn_on` wakes the device with Wake-on-LAN instead. Off, the entity is left with only power, since a powered-off device has nothing to change the volume or source of, or media to control, whether or not it would still answer. The retained discovery message can be published again at any time to update it, or emptied to remove the entity and its device.
 
 **Controls.** Each is offered only when the discovery message maps its command, so a device shows just what it can do:
 
@@ -134,8 +134,8 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `availability_topic` | no | When set, the entity is unavailable until `payload_available` is received, unless `mac` is also set. |
 | `mac` | no | The device's MAC address. While `availability_topic` reports it unreachable, the entity stays available and `turn_on` sends a Wake-on-LAN magic packet instead of the usual command. |
 | `image_topic` | no | Topic with the raw image bytes (PNG, JPEG, GIF, WebP or SVG) of the current source, e.g. an app icon or a channel picon. Publish it retained when the source changes, an empty payload clears it. The image is shown in the media card. |
-| `payload_available` | no | Default `online`. |
-| `payload_not_available` | no | Default `offline`. |
+| `payload_available` | no | Default `online`. Also takes a list, for a device whose connection can read more than one way. |
+| `payload_not_available` | no | Default `offline`. Also takes a list, e.g. a clean sleep and an unexpected disconnect reading differently. |
 | `device` | no | `identifiers`, `name`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number`, `configuration_url`. |
 | `commands` | no | Action to command key mapping, see below. Actions without a mapping are not offered. |
 | `assumed_state` | no | `true` shows play, pause and stop as separate buttons in the media card (and power on / off), for devices whose play state is not always reported. Without it the frontend shows stop only for devices that cannot pause. The frontend then also shows separate power on and power off buttons. For stop with a single power button use the `media_stop` control of the Tile card playback feature instead. |

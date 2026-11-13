@@ -169,8 +169,10 @@ CONFIG_SCHEMA = vol.Schema(
         # Media browser icons fetched by the device: {BrowseImage: {type, id}} on the command
         # topic, the device answers with the image bytes on <browse_image_topic>/<key>
         vol.Optional("browse_image_topic"): vol.All(str, vol.Length(min=1)),
-        vol.Optional("payload_available", default="online"): str,
-        vol.Optional("payload_not_available", default="offline"): str,
+        # Either a single payload or a list, for a device whose connection can
+        # go by more than one reading (e.g. a clean sleep and a dropped link).
+        vol.Optional("payload_available", default="online"): vol.Any(str, [str]),
+        vol.Optional("payload_not_available", default="offline"): vol.Any(str, [str]),
         vol.Optional("device", default=dict): DEVICE_SCHEMA,
         vol.Optional("commands", default=dict): COMMANDS_SCHEMA,
         vol.Optional("sources", default=list): [ITEM_SCHEMA],
