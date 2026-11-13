@@ -290,8 +290,11 @@ async def test_wake_on_lan_while_unavailable(hass: HomeAssistant, mqtt_mock, mon
     async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
     await hass.async_block_till_done()
     await _service(hass, "turn_on")
-    assert sent == ["AA:BB:CC:DD:EE:FF"], "turn_on uses the normal command once the device answers again"
-    assert _sent(mqtt_mock) == [(DENON["command_topic"], {"Power": True})]
+    assert sent == ["AA:BB:CC:DD:EE:FF", "AA:BB:CC:DD:EE:FF"], (
+        "still Wake-on-LAN once reachable again - a normal command needs the device "
+        "already listening for network wake-ups, which a deeper sleep leaves it not doing"
+    )
+    assert _sent(mqtt_mock) == []
 
 
 async def test_availability_as_a_list(hass: HomeAssistant, mqtt_mock) -> None:

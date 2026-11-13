@@ -14,7 +14,7 @@ The built-in MQTT integration does not support `media_player` discovery. This in
 
 **Controls.** Each is offered only when the discovery message maps its command, so a device shows just what it can do:
 
-* power on / off, also for devices that flip the state on every command (`toggle`), with Wake-on-LAN for turning one on while it is unreachable (`mac`)
+* power on / off, also for devices that flip the state on every command (`toggle`), with Wake-on-LAN for turning one on whenever its MAC address is given (`mac`), since many devices have no command of their own that reaches them while off
 * volume set, volume up / down (a device that can only step the volume gets up / down without the slider) and mute
 * source selection and sound mode selection, with the names shown in Home Assistant mapped to the ids the device uses, and a different command key per item, e.g. apps launched with their own key
 * play, pause, stop, next and previous
@@ -132,7 +132,7 @@ Publish it **retained**. Publishing it again updates the entity (e.g. a new sour
 | `name` | no | Entity name. When omitted the entity uses the device name. |
 | `device_class` | no | `tv`, `receiver`, `speaker` or `projector`. |
 | `availability_topic` | no | When set, the entity is unavailable until `payload_available` is received, unless `mac` is also set. |
-| `mac` | no | The device's MAC address. While `availability_topic` reports it unreachable, the entity stays available and `turn_on` sends a Wake-on-LAN magic packet instead of the usual command. |
+| `mac` | no | The device's MAC address. `turn_on` always sends a Wake-on-LAN magic packet to it rather than the usual command, since a normal command needs a device already listening, which many have no way to do once powered off. Also keeps the entity available while `availability_topic` reports it unreachable. |
 | `image_topic` | no | Topic with the raw image bytes (PNG, JPEG, GIF, WebP or SVG) of the current source, e.g. an app icon or a channel picon. Publish it retained when the source changes, an empty payload clears it. The image is shown in the media card. |
 | `payload_available` | no | Default `online`. Also takes a list, for a device whose connection can read more than one way. |
 | `payload_not_available` | no | Default `offline`. Also takes a list, e.g. a clean sleep and an unexpected disconnect reading differently. |

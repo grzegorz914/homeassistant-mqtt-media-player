@@ -474,7 +474,10 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         return cmd
 
     async def async_turn_on(self) -> None:
-        if not self._available_flag and (mac := self._config.get("mac")):
+        # Wake-on-LAN whenever a MAC is given, reachable or not: the normal
+        # power command needs the device already listening for network
+        # wake-ups, which a deeper sleep than that leaves it not doing.
+        if mac := self._config.get("mac"):
             await self.hass.async_add_executor_job(_send_magic_packet, mac)
             return
         cmd = self._command("power")
