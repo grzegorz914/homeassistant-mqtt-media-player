@@ -341,6 +341,7 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
             self._available_flag = False
         else:
             return
+        self._update_from_state()
         self.async_write_ha_state()
 
     @property
@@ -350,6 +351,27 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         return self._available_flag or bool(self._config.get("mac"))
 
     def _update_from_state(self) -> None:
+        # Unreachable, kept available only for Wake-on-LAN: shown as off, with
+        # the last retained state's source and media info left behind rather
+        # than shown as current.
+        if not self._available_flag and self._config.get("mac"):
+            self._attr_state = MediaPlayerState.OFF
+            self._attr_volume_level = None
+            self._attr_is_volume_muted = None
+            self._attr_source = None
+            self._attr_sound_mode = None
+            self._attr_shuffle = None
+            self._attr_repeat = None
+            self._attr_media_position = None
+            self._attr_media_duration = None
+            self._attr_media_position_updated_at = None
+            for field in _MEDIA_FIELDS:
+                setattr(self, f"_attr_{field}", None)
+            self._attr_supported_features = self._config_features & (
+                MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF
+            )
+            return
+
         s = self._state
         power = s.get("power")
         reported = str(s.get("state", "")).lower()

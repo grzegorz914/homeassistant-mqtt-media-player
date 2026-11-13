@@ -251,13 +251,23 @@ async def test_wake_on_lan_while_unavailable(hass: HomeAssistant, mqtt_mock, mon
     await _setup(hass, mqtt_mock)
     await _discover(hass, cfg)
     async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
+    async_fire_mqtt_message(hass, DENON["state_topic"], json.dumps(
+        {"power": True, "source": "TV", "sound_mode": "MOVIE", "volume": 49}))
     await hass.async_block_till_done()
-    assert hass.states.get(ENTITY).state != "unavailable"
+    state = hass.states.get(ENTITY)
+    assert state.state != "unavailable"
+    assert state.attributes[ATTR_INPUT_SOURCE] == "TV Audio"
 
     async_fire_mqtt_message(hass, cfg["availability_topic"], "offline")
     await hass.async_block_till_done()
-    # Still available, through Wake-on-LAN, with the device itself unreachable.
-    assert hass.states.get(ENTITY).state != "unavailable"
+    state = hass.states.get(ENTITY)
+    # Still available, through Wake-on-LAN, with the device itself unreachable,
+    # shown as off rather than left on the last state it reported.
+    assert state.state == "off"
+    assert ATTR_INPUT_SOURCE not in state.attributes
+    assert ATTR_SOUND_MODE not in state.attributes
+    features = F(state.attributes[ATTR_SUPPORTED_FEATURES])
+    assert features == F.TURN_ON | F.TURN_OFF, "only power while unreachable"
 
     sent = []
     monkeypatch.setattr(
