@@ -116,7 +116,8 @@ async def test_shuffle_and_repeat(hass: HomeAssistant, mqtt_mock) -> None:
 
 
 async def test_pausable(hass: HomeAssistant, mqtt_mock) -> None:
-    player = {**MAIN, "commands": {**MAIN["commands"], "play": {"key": "Play"}, "pause": {"key": "Pause"}}}
+    player = {**MAIN, "commands": {**MAIN["commands"],
+        "play": {"key": "Play", "value": True}, "pause": {"key": "Pause", "value": True}}}
     await _setup(hass, player)
     await _state(hass, MAIN, {"power": True, "state": "playing"})
     assert {F.PLAY, F.PAUSE} <= set(_features(hass, "media_player.salon"))
@@ -167,7 +168,7 @@ async def test_channels_as_sound_modes(hass: HomeAssistant, mqtt_mock) -> None:
 
 
 async def test_stoppable(hass: HomeAssistant, mqtt_mock) -> None:
-    player = {**MAIN, "commands": {**MAIN["commands"], "stop": {"key": "Stop"}}}
+    player = {**MAIN, "commands": {**MAIN["commands"], "stop": {"key": "Stop", "value": True}}}
     await _setup(hass, player)
     await _state(hass, MAIN, {"power": True, "state": "playing"})
     assert F.STOP in _features(hass, "media_player.salon")
