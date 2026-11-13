@@ -7,6 +7,8 @@ from collections import OrderedDict
 import hashlib
 import json
 import logging
+import socket
+import time
 from typing import Any
 
 from datetime import datetime
@@ -47,6 +49,22 @@ _STATES = {
     "buffering": MediaPlayerState.BUFFERING,
     "off": MediaPlayerState.OFF,
 }
+
+def _send_magic_packet(mac: str) -> None:
+    """Broadcast a Wake-on-LAN magic packet to the given MAC address.
+
+    Sent 5 times, 100 ms apart, like this project's own homebridge-lgwebos-tv
+    plugin - a single UDP broadcast is easy to lose, Wi-Fi especially.
+    """
+    addr = mac.replace(":", "").replace("-", "").upper()
+    packet = bytes.fromhex("FF" * 6 + addr * 16)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for attempt in range(5):
+            sock.sendto(packet, ("255.255.255.255", 9))
+            if attempt < 4:
+                time.sleep(0.1)
+
 
 # Optional informational fields accepted in the state payload.
 _MEDIA_FIELDS = (
@@ -327,7 +345,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
 
     @property
     def available(self) -> bool:
-        return self._available_flag
+        # With a MAC address, turn_on works through Wake-on-LAN while the
+        # device itself is unreachable, so the entity stays available for it.
+        return self._available_flag or bool(self._config.get("mac"))
 
     def _update_from_state(self) -> None:
         s = self._state
@@ -432,6 +452,9 @@ class MqttUniversalMediaPlayer(MediaPlayerEntity):
         return cmd
 
     async def async_turn_on(self) -> None:
+        if not self._available_flag and (mac := self._config.get("mac")):
+            await self.hass.async_add_executor_job(_send_magic_packet, mac)
+            return
         cmd = self._command("power")
         if cmd["toggle"] and self.state not in (None, MediaPlayerState.OFF):
             return

@@ -1,6 +1,7 @@
 """End to end tests against a real Home Assistant core with mocked MQTT."""
 
 import json
+from unittest import mock
 from unittest.mock import call
 
 import pytest
@@ -23,6 +24,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from custom_components.mqtt_universal_media_player.const import DOMAIN
+from custom_components.mqtt_universal_media_player.media_player import _send_magic_packet
 
 DISCOVERY = "homeassistant/media_player/denon_avr_main/config"
 ENTITY = "media_player.denon_avr_x2800h"
@@ -207,6 +209,65 @@ async def test_toggle_mute_only_sent_when_needed(hass: HomeAssistant, mqtt_mock)
     assert _sent(mqtt_mock) == []
     await _service(hass, "volume_mute", **{ATTR_MEDIA_VOLUME_MUTED: False})
     assert _sent(mqtt_mock) == [(DENON["command_topic"], {"Mute": False})]
+
+
+def test_magic_packet_contents() -> None:
+    sent = []
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def setsockopt(self, *args):
+            pass
+
+        def sendto(self, packet, addr):
+            sent.append((packet, addr))
+
+    with (
+        mock.patch("socket.socket", return_value=FakeSocket()),
+        mock.patch("custom_components.mqtt_universal_media_player.media_player.time.sleep"),
+    ):
+        _send_magic_packet("aa:bb:cc:dd:ee:ff")
+
+    assert len(sent) == 5, "sent 5 times, Wi-Fi drops a lone broadcast too easily"
+    for packet, addr in sent:
+        assert addr == ("255.255.255.255", 9)
+        assert packet == b"\xff" * 6 + bytes.fromhex("AABBCCDDEEFF") * 16
+
+
+async def test_wake_on_lan_while_unavailable(hass: HomeAssistant, mqtt_mock, monkeypatch) -> None:
+    """A MAC address keeps the entity available and turns turn_on into Wake-on-LAN."""
+    cfg = {**DENON, "availability_topic": "denon/Denon AVR/Available", "mac": "AA:BB:CC:DD:EE:FF"}
+    await _setup(hass, mqtt_mock)
+    await _discover(hass, cfg)
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
+    await hass.async_block_till_done()
+    assert hass.states.get(ENTITY).state != "unavailable"
+
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "offline")
+    await hass.async_block_till_done()
+    # Still available, through Wake-on-LAN, with the device itself unreachable.
+    assert hass.states.get(ENTITY).state != "unavailable"
+
+    sent = []
+    monkeypatch.setattr(
+        "custom_components.mqtt_universal_media_player.media_player._send_magic_packet",
+        lambda mac: sent.append(mac),
+    )
+    mqtt_mock.async_publish.reset_mock()
+    await _service(hass, "turn_on")
+    assert sent == ["AA:BB:CC:DD:EE:FF"]
+    assert _sent(mqtt_mock) == []
+
+    async_fire_mqtt_message(hass, cfg["availability_topic"], "online")
+    await hass.async_block_till_done()
+    await _service(hass, "turn_on")
+    assert sent == ["AA:BB:CC:DD:EE:FF"], "turn_on uses the normal command once the device answers again"
+    assert _sent(mqtt_mock) == [(DENON["command_topic"], {"Power": True})]
 
 
 async def test_foreign_and_invalid_payloads_ignored(hass: HomeAssistant, mqtt_mock) -> None:

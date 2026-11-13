@@ -162,6 +162,9 @@ CONFIG_SCHEMA = vol.Schema(
         vol.Required("state_topic"): vol.All(str, vol.Length(min=1)),
         vol.Required("command_topic"): vol.All(str, vol.Length(min=1)),
         vol.Optional("availability_topic"): str,
+        # The command topic has nobody listening once the device is asleep -
+        # turn_on then sends a Wake-on-LAN magic packet to this address instead.
+        vol.Optional("mac"): str,
         vol.Optional("image_topic"): vol.All(str, vol.Length(min=1)),
         # Media browser icons fetched by the device: {BrowseImage: {type, id}} on the command
         # topic, the device answers with the image bytes on <browse_image_topic>/<key>
