@@ -71,7 +71,7 @@ Only messages containing `"platform": "mqtt_universal_media_player"` are handled
 * [homebridge-openwebif-tv](https://github.com/grzegorz914/homebridge-openwebif-tv), class `receiver`
 * [homebridge-xbox-tv](https://github.com/grzegorz914/homebridge-xbox-tv), class `receiver`
 * [homebridge-lgwebos-tv](https://github.com/grzegorz914/homebridge-lgwebos-tv), class `tv`
-* [Glasshouse](https://github.com/rorygallagher2024/glasshouse), the app on LG webOS TVs, class `tv`, with the Internet TV channels in the media browser and the programme on now
+* [Glasshouse](https://github.com/rorygallagher2024/glasshouse), the app on LG webOS TVs, class `tv`, with the Internet TV channels in the media browser and the programme on now, and IPTV as a source that opens the guide, with the channels in the sound mode selector while Internet TV is up
 
 Enable **MQTT → HA Discovery** in the plugin settings.
 
